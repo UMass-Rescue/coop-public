@@ -103,15 +103,29 @@ Dependencies): RequestHandlerWithBodies<SubmitItemsInput, undefined> {
       items.map(async (message) => {
         const itemSubmission = await toItemSubmission(message);
 
-        if (
-          Array.isArray(itemSubmission.itemSubmission?.data.images) &&
-          itemSubmission.itemSubmission.data.images.length > 0 &&
-          !itemSubmission.error
-        ) {
+        // Extract image URLs from the images field
+        // Handles: array of strings, single string, or normalized IMAGE type {url: "..."}
+        const imagesField = itemSubmission.itemSubmission?.data.images;
+        let imagesList: string[] = [];
+        
+        if (Array.isArray(imagesField)) {
+          imagesList = imagesField.map(img => {
+            if (typeof img === 'string') return img;
+            if (img && typeof img === 'object' && 'url' in img) return String((img as {url: string}).url);
+            return '';
+          }).filter(Boolean);
+        } else if (typeof imagesField === 'string' && imagesField) {
+          imagesList = [imagesField];
+        } else if (imagesField && typeof imagesField === 'object') {
+          if ('url' in imagesField) {
+            imagesList = [String((imagesField as {url: string}).url)];
+          }
+        }
+
+        if (imagesList.length > 0 && !itemSubmission.error) {
           try {
-            const images = itemSubmission.itemSubmission.data.images as (string | {url: string})[];
+            const images = imagesList as (string | {url: string})[];
             
-            // Get all hash banks for this org once
             const allBanks = await HMAHashBankService.listBanks(orgId);
             const allBankNames = allBanks.map(bank => bank.hma_name);
             
@@ -173,9 +187,17 @@ Dependencies): RequestHandlerWithBodies<SubmitItemsInput, undefined> {
                 return null;
               })
             );
-            // Attach the hashes array to the item submission data
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (itemSubmission.itemSubmission.data as any).images = imageHashes;
+            // Augment image field with hashes, preserving structure for rule engine
+            const currentImages = itemSubmission.itemSubmission.data.images;
+            if (imageHashes.length === 1 && imageHashes[0] && currentImages && typeof currentImages === 'object' && !Array.isArray(currentImages)) {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              (currentImages as any).hashes = imageHashes[0].hashes;
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              (currentImages as any).matchedBanks = imageHashes[0].matchedBanks;
+            } else {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              (itemSubmission.itemSubmission.data as any).images = imageHashes;
+            }
           } catch (error) {
             // eslint-disable-next-line no-console
             console.error('Failed to get HMA hashes for images:', error);

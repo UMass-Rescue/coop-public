@@ -95,13 +95,29 @@ export default function submitReport({
       const additionalItems = req.body.additionalItems;
       const reportedItemSubmission = await toItemSubmission(reportedItem);
 
-      if (
-        Array.isArray(reportedItem.data.images) &&
-        reportedItem.data.images.length > 0 &&
-        !reportedItemSubmission.error
-      ) {
+      // Extract image URLs from the images field
+      // Handles: array of strings, single string, or normalized IMAGE type {url: "..."}
+      const imagesField = reportedItem.data.images;
+      let imagesList: string[] = [];
+      
+      if (Array.isArray(imagesField)) {
+        imagesList = imagesField.map((img: unknown) => {
+          if (typeof img === 'string') return img;
+          if (img && typeof img === 'object' && 'url' in img) return String((img as {url: string}).url);
+          return '';
+        }).filter(Boolean);
+      } else if (typeof imagesField === 'string' && imagesField) {
+        imagesList = [imagesField];
+      } else if (imagesField && typeof imagesField === 'object') {
+        // Handle normalized IMAGE type: {url: "..."}
+        if ('url' in imagesField) {
+          imagesList = [String((imagesField as {url: string}).url)];
+        }
+      }
+
+      if (imagesList.length > 0 && !reportedItemSubmission.error) {
         try {
-          const images = reportedItem.data.images as string[];
+          const images = imagesList;
           
           // Get all hash banks for this org once
           const allBanks = await HMAHashBankService.listBanks(orgId);
@@ -164,9 +180,17 @@ export default function submitReport({
               return null;
             })
           );
-          // Attach the hashes array to the item submission data
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (reportedItemSubmission.itemSubmission.data as any).images = imageHashes;
+          // Augment image field with hashes, preserving structure for rule engine
+          const currentImages = reportedItemSubmission.itemSubmission.data.images;
+          if (imageHashes.length === 1 && imageHashes[0] && currentImages && typeof currentImages === 'object' && !Array.isArray(currentImages)) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (currentImages as any).hashes = imageHashes[0].hashes;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (currentImages as any).matchedBanks = imageHashes[0].matchedBanks;
+          } else {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (reportedItemSubmission.itemSubmission.data as any).images = imageHashes;
+          }
         } catch (error) {
           // eslint-disable-next-line no-console
           console.error('Failed to get HMA hashes for images:', error);

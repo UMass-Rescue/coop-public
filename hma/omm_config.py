@@ -24,6 +24,13 @@ from threatexchange.exchanges.impl.fb_threatexchange_api import (
     FBThreatExchangeSignalExchangeAPI,
 )
 
+try:
+    from tx_extension_clip import CLIPFloatSignal
+    CLIP_ENABLED = True
+except ImportError:
+    CLIP_ENABLED = False
+    logging.warning("CLIP extension not available. CLIP signals will not be enabled.")
+
 # Database configuration
 DBUSER = os.environ.get("POSTGRES_USER", "postgres")
 DBPASS = os.environ.get("POSTGRES_PASSWORD", "postgres123")
@@ -49,8 +56,12 @@ TASK_INDEX_CACHE_INTERVAL_SECONDS = 60
 MAX_REMOTE_FILE_SIZE = 100 * 1024 * 1024  # 100MB max file size
 
 # Core functionality configuration
+signal_types = [PdqSignal, VideoMD5Signal]
+if CLIP_ENABLED:
+    signal_types.append(CLIPFloatSignal)
+
 STORAGE_IFACE_INSTANCE = DefaultOMMStore(
-    signal_types=[PdqSignal, VideoMD5Signal],
+    signal_types=signal_types,
     content_types=[PhotoContent, VideoContent],
     exchange_types=[
         StaticSampleSignalExchangeAPI,
