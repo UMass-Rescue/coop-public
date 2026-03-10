@@ -14,7 +14,6 @@
     "@aws-sdk/client-rds": "^3.49.0",
     "@clickhouse/client": "^1.13.0",
     "@roostorg/db-migrator": "^1.0.8",
-    "@types/umzug": "^2.3.3",
     "cassandra-driver": "^4.8.0",
     "csv-parse": "^5.0.4",
     "kysely": "^0.26.1",
@@ -32,5 +31,10 @@
     "@types/pg": "^8.10.2",
     "dotenv": "^16.0.0",
     "typescript": "^5.2.2"
+  },
+  "overrides": {
+    "snowflake-sdk": {
+      "@tootallnate/once": "^3.0.1"
+    }
   }
 }
