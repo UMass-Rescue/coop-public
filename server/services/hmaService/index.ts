@@ -439,15 +439,21 @@ export class HmaService {
       contentType?: ContentType;
       signalType?: string;
       signal?: string;
+      banks?: string[];
     }
   ): Promise<LookupResponse> {
-    const { url, contentType, signalType, signal } = options;
+    const { url, contentType, signalType, signal, banks } = options;
 
     const params = new URLSearchParams();
     if (url) params.append('url', url);
     if (contentType) params.append('content_type', contentType);
     if (signalType) params.append('signal_type', signalType);
     if (signal) params.append('signal', signal);
+    if (banks) {
+      for (const bank of banks) {
+        params.append('bank', bank);
+      }
+    }
 
     const response = await this.fetchHTTP({
       url: `${this.hmaServiceUrl}/m/lookup?${params.toString()}`,
@@ -462,53 +468,140 @@ export class HmaService {
     return response.body as unknown as LookupResponse;
   }
 
-  /**
-   * Checks if an image matches any images in any of the provided hash banks
-   * and returns detailed match information
-   * @param hmaBankIds Array of hash bank IDs to check against
-   * @param signalType The type of signal (e.g. 'pdq', 'md5', etc.)
-   * @param signal The hash value to check
-   * @returns A promise that resolves to an object with matched status and list of matched banks
-   */
   async checkImageMatchWithDetails(
     hmaBankIds: string[], 
     signalType: string, 
     signal: string
-  ): Promise<{ matched: boolean; matchedBanks: string[] }> {
+  ): Promise<{
+    matched: boolean;
+    matchedBanks: string[];
+    matchedContentIds: number[];
+  }> {
     const matches: LookupResponse = await this.lookupContent({
       signal,
       signalType,
+      banks: hmaBankIds,
     });
 
     const matchedBanks: string[] = [];
+    const matchedContentIds: number[] = [];
 
-    // Check which banks have matches
-    hmaBankIds.forEach(bankId => {
+    for (const bankId of hmaBankIds) {
       const bankMatches = matches[bankId];
       if (bankMatches && bankMatches.length > 0) {
-        // TODO: Implement some configuration for the distance threshold
         matchedBanks.push(bankId);
+        for (const m of bankMatches) {
+          if (!matchedContentIds.includes(m.bank_content_id)) {
+            matchedContentIds.push(m.bank_content_id);
+          }
+        }
       }
-    });
+    }
 
     return {
       matched: matchedBanks.length > 0,
       matchedBanks,
+      matchedContentIds,
     };
   }
 
   /**
-   * Checks if an image matches any images in any of the provided hash banks
-   * @param hmaBankIds Array of hash bank IDs to check against
-   * @param signalType The type of signal (e.g. 'pdq', 'md5', etc.)
-   * @param signal The hash value to check
-   * @returns A promise that resolves to true if the image matches any images in any of the banks
-   * @deprecated Use checkImageMatchWithDetails for more detailed information
+   * Hash a single image URL and match against all provided banks.
+   * Returns hash results with user-friendly bank names.
    */
-  async checkImageMatch(hmaBankIds: string[], signalType: string, signal: string): Promise<boolean> {
-    const result = await this.checkImageMatchWithDetails(hmaBankIds, signalType, signal);
-    return result.matched;
+  async hashAndMatchImageUrl(
+    url: string,
+    allBanks: HashBank[],
+  ): Promise<{ url: string; hashes: Record<string, string>; matchedBanks?: string[] }> {
+    const hashes = await this.hashContentFromUrl(url);
+
+    const allBankNames = allBanks.map(b => b.hma_name);
+    const matchedBankNames: string[] = [];
+
+    if (Object.keys(hashes).length > 0 && allBankNames.length > 0) {
+      const matchResults = await Promise.all(
+        Object.entries(hashes).map(async ([signalType, hash]) =>
+          this.checkImageMatchWithDetails(allBankNames, signalType, hash)
+        )
+      );
+
+      const allMatchedHmaBanks = new Set<string>();
+      for (const result of matchResults) {
+        for (const bank of result.matchedBanks) allMatchedHmaBanks.add(bank);
+      }
+
+      for (const hmaName of allMatchedHmaBanks) {
+        const bank = allBanks.find(b => b.hma_name === hmaName);
+        if (bank) matchedBankNames.push(bank.name);
+      }
+    }
+
+    return {
+      url,
+      hashes,
+      matchedBanks: matchedBankNames.length > 0 ? matchedBankNames : undefined,
+    };
   }
+
+  /**
+   * Extract image URLs from an item data field, hash and match each against
+   * the org's banks, and augment the data object in place with results.
+   */
+  async hashAndMatchImagesForItem(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    data: Record<string, any>,
+    orgId: string,
+  ): Promise<void> {
+    const imageUrls = extractImageUrls(data.images);
+    if (imageUrls.length === 0) return;
+
+    const allBanks = await this.listBanks(orgId);
+
+    const imageHashes = await Promise.all(
+      imageUrls.map(async (url) => {
+        try {
+          return await this.hashAndMatchImageUrl(url, allBanks);
+        } catch {
+          return { url, hashes: {} as Record<string, string> };
+        }
+      })
+    );
+
+    const currentImages = data.images;
+    if (imageHashes.length === 1 && imageHashes[0] && currentImages && typeof currentImages === 'object' && !Array.isArray(currentImages)) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const img = currentImages as any;
+      img.hashes = imageHashes[0].hashes;
+      img.matchedBanks = imageHashes[0].matchedBanks;
+    } else {
+      data.images = imageHashes;
+    }
+  }
+}
+
+/**
+ * Extract image URLs from a data field that may be a string, array, or object.
+ */
+function extractImageUrls(imagesField: unknown): string[] {
+  if (!imagesField) return [];
+
+  if (Array.isArray(imagesField)) {
+    return imagesField
+      .map((img: unknown) => {
+        if (typeof img === 'string') return img;
+        if (img && typeof img === 'object' && 'url' in img) return String((img as { url: string }).url);
+        return '';
+      })
+      .filter(Boolean);
+  }
+
+  if (typeof imagesField === 'string') return [imagesField];
+
+  if (typeof imagesField === 'object' && 'url' in imagesField) {
+    return [String((imagesField as { url: string }).url)];
+  }
+
+  return [];
 }
 
 export default inject(['fetchHTTP', 'KyselyPg'], HmaService);

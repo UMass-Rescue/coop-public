@@ -115,6 +115,7 @@ export default class ImageSimilarityMatchSignal extends SignalBase<
     // Check all available hash types and collect matched banks
     const bankNames = banks.map(bank => bank.hma_name);
     const allMatchedBanks = new Set<string>();
+    const allMatchedContentIds = new Set<number>();
 
     const hashCheckResults = await Promise.all(
       Object.entries(imageValue.hashes).map(async ([signalType, hash]) =>
@@ -122,14 +123,13 @@ export default class ImageSimilarityMatchSignal extends SignalBase<
       )
     );
 
-    // Collect all matched banks from all hash types
-    hashCheckResults.forEach(result => {
-      result.matchedBanks.forEach(bank => allMatchedBanks.add(bank));
-    });
+    for (const result of hashCheckResults) {
+      for (const bank of result.matchedBanks) allMatchedBanks.add(bank);
+      for (const id of result.matchedContentIds) allMatchedContentIds.add(id);
+    }
 
     const isMatch = allMatchedBanks.size > 0;
 
-    // Map HMA bank names back to user-friendly bank names
     const matchedBankNames = Array.from(allMatchedBanks).map(hmaName => {
       const bank = banks.find(b => b.hma_name === hmaName);
       return bank?.name ?? hmaName;
@@ -138,9 +138,11 @@ export default class ImageSimilarityMatchSignal extends SignalBase<
     return {
       score: isMatch,
       outputType: { scalarType: ScalarTypes.BOOLEAN },
-      // Store matched banks as metadata for frontend display
-      matchedValue: matchedBankNames.length > 0 
-        ? jsonStringify({ matchedBanks: matchedBankNames })
+      matchedValue: matchedBankNames.length > 0
+        ? jsonStringify({
+            matchedBanks: matchedBankNames,
+            matchedContentIds: [...allMatchedContentIds],
+          })
         : undefined,
     };
   }

@@ -85,6 +85,9 @@ services:
       - POSTGRES_USER=postgres
       - POSTGRES_DB=postgres
       - POSTGRES_HOST=postgres
+      - HF_TOKEN=${HF_TOKEN:-}
+    volumes:
+      - hma_hf_cache:/root/.cache/huggingface
     ports:
       - '5000:5000'
     depends_on:
@@ -242,3 +245,4 @@ volumes:
   kafka_data:
   schema_registry_data:
   clickhouse_data:
+  hma_hf_cache:
