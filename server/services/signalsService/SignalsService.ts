@@ -115,6 +115,7 @@ export class SignalsService {
     signalAuthService: Dependencies['SignalAuthService'],
     getUserScoreEventuallyConsistent: Dependencies['getUserScoreEventuallyConsistent'],
     fetchHTTP: Dependencies['fetchHTTP'],
+    itemInvestigationService: Dependencies['ItemInvestigationService'],
   ) {
     const cachedCredentialGetters =
       makeCachedCredentialGetters(signalAuthService);
@@ -132,6 +133,7 @@ export class SignalsService {
       this.userStrikeService,
       this.getPoliciesByIdEventuallyConsistent,
       this.hmaService,
+      itemInvestigationService,
     );
 
     this.close = async function () {
@@ -342,6 +344,7 @@ export default inject(
     'SignalAuthService',
     'getUserScoreEventuallyConsistent',
     'fetchHTTP',
+    'ItemInvestigationService',
   ],
   SignalsService,
 );

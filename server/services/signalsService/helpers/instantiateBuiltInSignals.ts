@@ -3,6 +3,7 @@ import { type ItemIdentifier } from '@roostorg/types';
 
 import type { AggregationsService } from '../../aggregationsService/index.js';
 import type { HmaService } from '../../hmaService/index.js';
+import type { ItemInvestigationService } from '../../itemInvestigationService/index.js';
 import type { GetPoliciesByIdEventuallyConsistent } from '../../manualReviewToolService/manualReviewToolQueries.js';
 import { type UserScore } from '../../userStatisticsService/userStatisticsService.js';
 import { type UserStrikeService } from '../../userStrikeService/index.js';
@@ -33,12 +34,14 @@ import OpenAiSexualMinorsTextSignal from '../signals/third_party_signals/open_ai
 import OpenAiSexualTextSignal from '../signals/third_party_signals/open_ai/moderation/OpenAiSexualTextSignal.js';
 import OpenAiViolenceTextSignal from '../signals/third_party_signals/open_ai/moderation/OpenAiViolenceTextSignal.js';
 import OpenAiWhisperTranscriptionSignal from '../signals/third_party_signals/open_ai/whisper/OpenAiWhisperTranscriptionSignal.js';
+import SentinelRareClassAffinitySignal from '../signals/third_party_signals/sentinel/SentinelRareClassAffinitySignal.js';
 import ZentropiLabelerSignal from '../signals/third_party_signals/zentropi/ZentropiLabelerSignal.js';
 import UserScoreSignal from '../signals/UserScoreSignal.js';
 import UserStrikesSignal from '../signals/UserStrikesSignal.js';
 import { SignalType, type BuiltInSignalType } from '../types/SignalType.js';
 import { type CredentialGetters } from './makeCachedCredentialsGetters.js';
 import { type CachedFetchers } from './makeCachedFetchers.js';
+import { makeSentinelService } from '../../sentinelService/index.js';
 
 export function instantiateBuiltInSignals(
   credentialGetters: CredentialGetters,
@@ -51,6 +54,7 @@ export function instantiateBuiltInSignals(
   userStrikeService: UserStrikeService,
   _getPoliciesByIdEventuallyConsistent: GetPoliciesByIdEventuallyConsistent,
   hmaService: HmaService,
+  itemInvestigationService: ItemInvestigationService,
 ) {
   const {
     googleContentSafetyFetcher: getGoogleContentSafetyScores,
@@ -128,6 +132,10 @@ export function instantiateBuiltInSignals(
       new GoogleCloudTranslationAPISignal(),
     [SignalType.BENIGN_MODEL]: new CoopRiskModelSignal(),
     [SignalType.AGGREGATION]: new AggregationSignal(aggregationsService),
+    [SignalType.SENTINEL_RARE_CLASS_AFFINITY]: new SentinelRareClassAffinitySignal(
+      makeSentinelService(process.env.SENTINEL_API_URL),
+      itemInvestigationService,
+    ),
     [SignalType.ZENTROPI_LABELER]: new ZentropiLabelerSignal(
       credentialGetters.ZENTROPI,
       getZentropiScores,
