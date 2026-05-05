@@ -23,6 +23,7 @@ const typeDefs = /* GraphQL */ `
     MICROSOFT_AZURE_CONTENT_MODERATOR
     OOPSPAM
     OPEN_AI
+    SENTINEL
     SIGHT_ENGINE
     TWO_HAT
     ZENTROPI
