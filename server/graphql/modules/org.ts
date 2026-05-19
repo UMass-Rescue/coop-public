@@ -587,6 +587,13 @@ const Org: GQLOrgResolvers = {
     return users.filter((u) => u.getPermissions().includes('EDIT_MRT_QUEUES'));
   },
   async defaultInterfacePreferences(org, _, context) {
+    const user = context.getUser();
+    if (!user || user.orgId !== org.id) {
+      throw unauthenticatedError('Authenticated user required');
+    }
+    if (!user.getPermissions().includes('MANAGE_ORG')) {
+      throw forbiddenError('User does not have permission to view org safety settings');
+    }
     const orgDefaults =
       await context.services.UserManagementService.getOrgDefaultUserInterfaceSettings(
         org.id,
@@ -722,6 +729,9 @@ const Mutation: GQLMutationResolvers = {
     if (!user) {
       throw unauthenticatedError('User required.');
     }
+    if (!user.getPermissions().includes('MANAGE_ORG')) {
+      throw forbiddenError('User does not have permission to update org safety settings');
+    }
     await context.services.UserManagementService.upsertOrgDefaultUserInterfaceSettings(
       {
         orgId: user.orgId,
@@ -759,6 +769,10 @@ const Mutation: GQLMutationResolvers = {
     const user = context.getUser();
     if (!user) {
       throw unauthenticatedError('User required.');
+    }
+
+    if (!user.getPermissions().includes('MANAGE_ORG')) {
+      throw forbiddenError('User does not have permission to manage SSO settings');
     }
 
     return context.services.OrgSettingsService.updateSamlSettings({
