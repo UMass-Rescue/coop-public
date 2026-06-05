@@ -203,6 +203,11 @@ gql`
         type
         detail
       }
+      ... on MissingRequiredDecisionReasonError {
+        title
+        status
+        type
+      }
       ... on MissingRequiredPolicyForDecisionError {
         title
         status
@@ -532,6 +537,26 @@ function ManualReviewJobReviewImpl(props: {
             setModalInfo({
               visible: true,
               modalBody: 'Job submission failed. Please try again.',
+              footer: [
+                {
+                  title: 'Ok',
+                  type: 'primary',
+                  onClick: hideModal,
+                },
+              ],
+            });
+            break;
+          }
+          case 'MissingRequiredDecisionReasonError': {
+            // Server-side backstop for `requiresDecisionReasonInMrt`.
+            // Normally the canBeSubmitted gate prevents reaching this state,
+            // but the org setting could have flipped between page load and
+            // submit, or the reviewer typed only whitespace (which the gate
+            // also rejects, but a scripted client could still get here).
+            setModalInfo({
+              visible: true,
+              modalBody:
+                'This org requires every decision to include a reason. Add a reason and resubmit.',
               footer: [
                 {
                   title: 'Ok',
