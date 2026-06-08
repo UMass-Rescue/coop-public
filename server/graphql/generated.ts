@@ -2576,21 +2576,31 @@ export type GQLMutation = {
   readonly submitManualReviewDecision: GQLSubmitDecisionResponse;
   readonly updateAccountInfo?: Maybe<Scalars['Boolean']['output']>;
   readonly updateAction: GQLMutateActionResponse;
+  readonly updateAllowMultiplePoliciesPerAction: Scalars['Boolean']['output'];
   readonly updateAppealSettings: GQLAppealSettings;
   readonly updateContentItemType: GQLMutateContentItemTypeResponse;
   readonly updateContentRule: GQLUpdateContentRuleResponse;
   readonly updateExchangeCredentials: Scalars['Boolean']['output'];
+  readonly updateHasAppealsEnabled: Scalars['Boolean']['output'];
+  readonly updateHasReportingRulesEnabled: Scalars['Boolean']['output'];
   readonly updateHashBank: GQLMutateHashBankResponse;
+  readonly updateHideSkipButtonForNonAdmins: Scalars['Boolean']['output'];
+  readonly updateIgnoreCallbackUrl: Scalars['Boolean']['output'];
   readonly updateLocationBank: GQLMutateLocationBankResponse;
   readonly updateManualReviewQueue: GQLUpdateManualReviewQueueQueueResponse;
   readonly updateNcmecOrgSettings: GQLUpdateNcmecOrgSettingsResponse;
   readonly updateOrgInfo: GQLUpdateOrgInfoSuccessResponse;
+  readonly updatePartialItemsSettings: Scalars['Boolean']['output'];
   readonly updatePolicy: GQLUpdatePolicyResponse;
+  readonly updatePreviewJobsViewEnabled: Scalars['Boolean']['output'];
   readonly updateReportingRule: GQLUpdateReportingRuleResponse;
+  readonly updateRequiresDecisionReason: Scalars['Boolean']['output'];
+  readonly updateRequiresPolicyForDecisions: Scalars['Boolean']['output'];
   readonly updateRole?: Maybe<Scalars['Boolean']['output']>;
   readonly updateRolePermissions: GQLRole;
   readonly updateRoutingRule: GQLUpdateRoutingRuleResponse;
   readonly updateSSOCredentials: Scalars['Boolean']['output'];
+  readonly updateSamlEnabled: Scalars['Boolean']['output'];
   readonly updateTextBank: GQLMutateBankResponse;
   readonly updateThreadItemType: GQLMutateThreadItemTypeResponse;
   readonly updateUserItemType: GQLMutateUserItemTypeResponse;
@@ -2851,6 +2861,10 @@ export type GQLMutationUpdateActionArgs = {
   input: GQLUpdateActionInput;
 };
 
+export type GQLMutationUpdateAllowMultiplePoliciesPerActionArgs = {
+  enabled: Scalars['Boolean']['input'];
+};
+
 export type GQLMutationUpdateAppealSettingsArgs = {
   input: GQLAppealSettingsInput;
 };
@@ -2868,8 +2882,24 @@ export type GQLMutationUpdateExchangeCredentialsArgs = {
   credentialsJson: Scalars['String']['input'];
 };
 
+export type GQLMutationUpdateHasAppealsEnabledArgs = {
+  enabled: Scalars['Boolean']['input'];
+};
+
+export type GQLMutationUpdateHasReportingRulesEnabledArgs = {
+  enabled: Scalars['Boolean']['input'];
+};
+
 export type GQLMutationUpdateHashBankArgs = {
   input: GQLUpdateHashBankInput;
+};
+
+export type GQLMutationUpdateHideSkipButtonForNonAdminsArgs = {
+  enabled: Scalars['Boolean']['input'];
+};
+
+export type GQLMutationUpdateIgnoreCallbackUrlArgs = {
+  url?: InputMaybe<Scalars['String']['input']>;
 };
 
 export type GQLMutationUpdateLocationBankArgs = {
@@ -2888,12 +2918,28 @@ export type GQLMutationUpdateOrgInfoArgs = {
   input: GQLUpdateOrgInfoInput;
 };
 
+export type GQLMutationUpdatePartialItemsSettingsArgs = {
+  input: GQLUpdatePartialItemsSettingsInput;
+};
+
 export type GQLMutationUpdatePolicyArgs = {
   input: GQLUpdatePolicyInput;
 };
 
+export type GQLMutationUpdatePreviewJobsViewEnabledArgs = {
+  enabled: Scalars['Boolean']['input'];
+};
+
 export type GQLMutationUpdateReportingRuleArgs = {
   input: GQLUpdateReportingRuleInput;
+};
+
+export type GQLMutationUpdateRequiresDecisionReasonArgs = {
+  enabled: Scalars['Boolean']['input'];
+};
+
+export type GQLMutationUpdateRequiresPolicyForDecisionsArgs = {
+  enabled: Scalars['Boolean']['input'];
 };
 
 export type GQLMutationUpdateRoleArgs = {
@@ -2910,6 +2956,10 @@ export type GQLMutationUpdateRoutingRuleArgs = {
 
 export type GQLMutationUpdateSsoCredentialsArgs = {
   input: GQLUpdateSsoCredentialsInput;
+};
+
+export type GQLMutationUpdateSamlEnabledArgs = {
+  enabled: Scalars['Boolean']['input'];
 };
 
 export type GQLMutationUpdateTextBankArgs = {
@@ -3202,6 +3252,7 @@ export type GQLOrg = {
   readonly hasReportingRulesEnabled: Scalars['Boolean']['output'];
   readonly hideSkipButtonForNonAdmins: Scalars['Boolean']['output'];
   readonly id: Scalars['ID']['output'];
+  readonly ignoreCallbackUrl?: Maybe<Scalars['String']['output']>;
   readonly integrationConfigs: ReadonlyArray<GQLIntegrationConfig>;
   readonly isDemoOrg: Scalars['Boolean']['output'];
   readonly itemTypes: ReadonlyArray<GQLItemType>;
@@ -3209,6 +3260,8 @@ export type GQLOrg = {
   readonly name: Scalars['String']['output'];
   readonly ncmecReports: ReadonlyArray<GQLNcmecReport>;
   readonly onCallAlertEmail?: Maybe<Scalars['String']['output']>;
+  readonly partialItemsEndpoint?: Maybe<Scalars['String']['output']>;
+  readonly partialItemsRequestHeaders?: Maybe<Scalars['JSONObject']['output']>;
   readonly pendingInvites: ReadonlyArray<GQLPendingInvite>;
   readonly policies: ReadonlyArray<GQLPolicy>;
   readonly previewJobsViewEnabled: Scalars['Boolean']['output'];
@@ -3218,6 +3271,7 @@ export type GQLOrg = {
   readonly requiresPolicyForDecisionsInMrt: Scalars['Boolean']['output'];
   readonly routingRules: ReadonlyArray<GQLRoutingRule>;
   readonly rules: ReadonlyArray<GQLRule>;
+  readonly samlEnabled: Scalars['Boolean']['output'];
   readonly signals: ReadonlyArray<GQLSignal>;
   readonly ssoCert?: Maybe<Scalars['String']['output']>;
   readonly ssoUrl?: Maybe<Scalars['String']['output']>;
@@ -4754,6 +4808,13 @@ export type GQLUpdateOrgInfoInput = {
 export type GQLUpdateOrgInfoSuccessResponse = {
   readonly __typename?: 'UpdateOrgInfoSuccessResponse';
   readonly _?: Maybe<Scalars['Boolean']['output']>;
+};
+
+export type GQLUpdatePartialItemsSettingsInput = {
+  readonly partialItemsEndpoint?: InputMaybe<Scalars['String']['input']>;
+  readonly partialItemsRequestHeaders?: InputMaybe<
+    Scalars['JSONObject']['input']
+  >;
 };
 
 export type GQLUpdatePolicyInput = {
@@ -6383,6 +6444,7 @@ export type GQLResolversTypes = {
   UpdateNcmecOrgSettingsResponse: ResolverTypeWrapper<GQLUpdateNcmecOrgSettingsResponse>;
   UpdateOrgInfoInput: GQLUpdateOrgInfoInput;
   UpdateOrgInfoSuccessResponse: ResolverTypeWrapper<GQLUpdateOrgInfoSuccessResponse>;
+  UpdatePartialItemsSettingsInput: GQLUpdatePartialItemsSettingsInput;
   UpdatePolicyInput: GQLUpdatePolicyInput;
   UpdatePolicyResponse: ResolverTypeWrapper<
     GQLResolversUnionTypes<GQLResolversTypes>['UpdatePolicyResponse']
@@ -7039,6 +7101,7 @@ export type GQLResolversParentTypes = {
   UpdateNcmecOrgSettingsResponse: GQLUpdateNcmecOrgSettingsResponse;
   UpdateOrgInfoInput: GQLUpdateOrgInfoInput;
   UpdateOrgInfoSuccessResponse: GQLUpdateOrgInfoSuccessResponse;
+  UpdatePartialItemsSettingsInput: GQLUpdatePartialItemsSettingsInput;
   UpdatePolicyInput: GQLUpdatePolicyInput;
   UpdatePolicyResponse: GQLResolversUnionTypes<GQLResolversParentTypes>['UpdatePolicyResponse'];
   UpdateReportingRuleInput: GQLUpdateReportingRuleInput;
@@ -11163,6 +11226,15 @@ export type GQLMutationResolvers<
     ContextType,
     RequireFields<GQLMutationUpdateActionArgs, 'input'>
   >;
+  updateAllowMultiplePoliciesPerAction?: Resolver<
+    GQLResolversTypes['Boolean'],
+    ParentType,
+    ContextType,
+    RequireFields<
+      GQLMutationUpdateAllowMultiplePoliciesPerActionArgs,
+      'enabled'
+    >
+  >;
   updateAppealSettings?: Resolver<
     GQLResolversTypes['AppealSettings'],
     ParentType,
@@ -11190,11 +11262,35 @@ export type GQLMutationResolvers<
       'apiName' | 'credentialsJson'
     >
   >;
+  updateHasAppealsEnabled?: Resolver<
+    GQLResolversTypes['Boolean'],
+    ParentType,
+    ContextType,
+    RequireFields<GQLMutationUpdateHasAppealsEnabledArgs, 'enabled'>
+  >;
+  updateHasReportingRulesEnabled?: Resolver<
+    GQLResolversTypes['Boolean'],
+    ParentType,
+    ContextType,
+    RequireFields<GQLMutationUpdateHasReportingRulesEnabledArgs, 'enabled'>
+  >;
   updateHashBank?: Resolver<
     GQLResolversTypes['MutateHashBankResponse'],
     ParentType,
     ContextType,
     RequireFields<GQLMutationUpdateHashBankArgs, 'input'>
+  >;
+  updateHideSkipButtonForNonAdmins?: Resolver<
+    GQLResolversTypes['Boolean'],
+    ParentType,
+    ContextType,
+    RequireFields<GQLMutationUpdateHideSkipButtonForNonAdminsArgs, 'enabled'>
+  >;
+  updateIgnoreCallbackUrl?: Resolver<
+    GQLResolversTypes['Boolean'],
+    ParentType,
+    ContextType,
+    Partial<GQLMutationUpdateIgnoreCallbackUrlArgs>
   >;
   updateLocationBank?: Resolver<
     GQLResolversTypes['MutateLocationBankResponse'],
@@ -11220,17 +11316,41 @@ export type GQLMutationResolvers<
     ContextType,
     RequireFields<GQLMutationUpdateOrgInfoArgs, 'input'>
   >;
+  updatePartialItemsSettings?: Resolver<
+    GQLResolversTypes['Boolean'],
+    ParentType,
+    ContextType,
+    RequireFields<GQLMutationUpdatePartialItemsSettingsArgs, 'input'>
+  >;
   updatePolicy?: Resolver<
     GQLResolversTypes['UpdatePolicyResponse'],
     ParentType,
     ContextType,
     RequireFields<GQLMutationUpdatePolicyArgs, 'input'>
   >;
+  updatePreviewJobsViewEnabled?: Resolver<
+    GQLResolversTypes['Boolean'],
+    ParentType,
+    ContextType,
+    RequireFields<GQLMutationUpdatePreviewJobsViewEnabledArgs, 'enabled'>
+  >;
   updateReportingRule?: Resolver<
     GQLResolversTypes['UpdateReportingRuleResponse'],
     ParentType,
     ContextType,
     RequireFields<GQLMutationUpdateReportingRuleArgs, 'input'>
+  >;
+  updateRequiresDecisionReason?: Resolver<
+    GQLResolversTypes['Boolean'],
+    ParentType,
+    ContextType,
+    RequireFields<GQLMutationUpdateRequiresDecisionReasonArgs, 'enabled'>
+  >;
+  updateRequiresPolicyForDecisions?: Resolver<
+    GQLResolversTypes['Boolean'],
+    ParentType,
+    ContextType,
+    RequireFields<GQLMutationUpdateRequiresPolicyForDecisionsArgs, 'enabled'>
   >;
   updateRole?: Resolver<
     Maybe<GQLResolversTypes['Boolean']>,
@@ -11255,6 +11375,12 @@ export type GQLMutationResolvers<
     ParentType,
     ContextType,
     RequireFields<GQLMutationUpdateSsoCredentialsArgs, 'input'>
+  >;
+  updateSamlEnabled?: Resolver<
+    GQLResolversTypes['Boolean'],
+    ParentType,
+    ContextType,
+    RequireFields<GQLMutationUpdateSamlEnabledArgs, 'enabled'>
   >;
   updateTextBank?: Resolver<
     GQLResolversTypes['MutateBankResponse'],
@@ -11690,6 +11816,11 @@ export type GQLOrgResolvers<
     ContextType
   >;
   id?: Resolver<GQLResolversTypes['ID'], ParentType, ContextType>;
+  ignoreCallbackUrl?: Resolver<
+    Maybe<GQLResolversTypes['String']>,
+    ParentType,
+    ContextType
+  >;
   integrationConfigs?: Resolver<
     ReadonlyArray<GQLResolversTypes['IntegrationConfig']>,
     ParentType,
@@ -11714,6 +11845,16 @@ export type GQLOrgResolvers<
   >;
   onCallAlertEmail?: Resolver<
     Maybe<GQLResolversTypes['String']>,
+    ParentType,
+    ContextType
+  >;
+  partialItemsEndpoint?: Resolver<
+    Maybe<GQLResolversTypes['String']>,
+    ParentType,
+    ContextType
+  >;
+  partialItemsRequestHeaders?: Resolver<
+    Maybe<GQLResolversTypes['JSONObject']>,
     ParentType,
     ContextType
   >;
@@ -11762,6 +11903,7 @@ export type GQLOrgResolvers<
     ParentType,
     ContextType
   >;
+  samlEnabled?: Resolver<GQLResolversTypes['Boolean'], ParentType, ContextType>;
   signals?: Resolver<
     ReadonlyArray<GQLResolversTypes['Signal']>,
     ParentType,

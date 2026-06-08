@@ -1255,6 +1255,42 @@ export class ManualReviewToolService {
     return this.manualReviewToolSettings.getPreviewJobsViewEnabled(orgId);
   }
 
+  async getIgnoreCallbackUrl(orgId: string) {
+    return this.manualReviewToolSettings.getIgnoreCallbackUrl(orgId);
+  }
+
+  async updateRequiresPolicyForDecisions(orgId: string, enabled: boolean) {
+    return this.manualReviewToolSettings.updateRequiresPolicyForDecisions(
+      orgId,
+      enabled,
+    );
+  }
+
+  async updateRequiresDecisionReason(orgId: string, enabled: boolean) {
+    return this.manualReviewToolSettings.updateRequiresDecisionReason(
+      orgId,
+      enabled,
+    );
+  }
+
+  async updateHideSkipButtonForNonAdmins(orgId: string, enabled: boolean) {
+    return this.manualReviewToolSettings.updateHideSkipButtonForNonAdmins(
+      orgId,
+      enabled,
+    );
+  }
+
+  async updatePreviewJobsViewEnabled(orgId: string, enabled: boolean) {
+    return this.manualReviewToolSettings.updatePreviewJobsViewEnabled(
+      orgId,
+      enabled,
+    );
+  }
+
+  async updateIgnoreCallbackUrl(orgId: string, url: string | null) {
+    return this.manualReviewToolSettings.updateIgnoreCallbackUrl(orgId, url);
+  }
+
   async getJobComments(opts: { orgId: string; jobId: string }) {
     return this.commentOps.getComments(opts);
   }
