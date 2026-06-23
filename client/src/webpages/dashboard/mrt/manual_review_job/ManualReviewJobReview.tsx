@@ -1,5 +1,5 @@
-import { ReactComponent as Sidebar1 } from '@/icons/lni/Design/sidebar-1.svg';
-import { ReactComponent as AngleDoubleRight } from '@/icons/lni/Direction/angle-double-right.svg';
+import Sidebar1 from '@/icons/lni/Design/sidebar-1.svg?react';
+import AngleDoubleRight from '@/icons/lni/Direction/angle-double-right.svg?react';
 import { __throw } from '@/utils/misc';
 import { isNonEmptyString } from '@/utils/string';
 import { multilevelListFromFlatList } from '@/utils/tree';
@@ -710,7 +710,7 @@ function ManualReviewJobReviewImpl(props: {
   const [submitDecision, { loading: submissionLoading }] =
     useGQLSubmitManualReviewDecisionMutation({
       fetchPolicy: 'no-cache',
-      onError: (e) => {
+      onError: (_e) => {
         setModalInfo({
           visible: true,
           modalBody: 'Unknown error occured.',

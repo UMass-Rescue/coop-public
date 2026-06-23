@@ -1,5 +1,5 @@
-import { ReactComponent as CopyAlt } from '@/icons/lni/Web and Technology/copy-alt.svg';
-import { ReactComponent as TrashCan } from '@/icons/lni/Web and Technology/trash-can.svg';
+import CopyAlt from '@/icons/lni/Web and Technology/copy-alt.svg?react';
+import TrashCan from '@/icons/lni/Web and Technology/trash-can.svg?react';
 import { PlusOutlined } from '@ant-design/icons';
 import { gql } from '@apollo/client';
 import { Button, Form, Radio, Select, Tooltip } from 'antd';
@@ -364,7 +364,7 @@ export default function RuleForm() {
   };
 
   const [createRule] = useGQLCreateReportingRuleMutation({
-    onError: (error) => {
+    onError: (_error) => {
       showRuleMutationError(false);
     },
     onCompleted: (result) => {
@@ -386,7 +386,7 @@ export default function RuleForm() {
   });
 
   const [updateRule] = useGQLUpdateReportingRuleMutation({
-    onError: (error) => {
+    onError: (_error) => {
       showRuleMutationError(true);
     },
     onCompleted: (result) => {

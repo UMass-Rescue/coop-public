@@ -2,9 +2,10 @@
 
 !src/
 !public/
-!.npmrc
-!craco.config.js
 !package*.json
+!index.html
+!vite.config.ts
+!vite-env.d.ts
 !postcss.config.js
 !tailwind.config.js
 !tsconfig.json

@@ -1,6 +1,6 @@
-import { ReactComponent as ChevronLeft } from '@/icons/lni/Direction/chevron-left.svg';
-import { ReactComponent as ChevronRight } from '@/icons/lni/Direction/chevron-right.svg';
-import { ReactComponent as CrossCircle } from '@/icons/lni/Interface and Sign/cross-circle.svg';
+import ChevronLeft from '@/icons/lni/Direction/chevron-left.svg?react';
+import ChevronRight from '@/icons/lni/Direction/chevron-right.svg?react';
+import CrossCircle from '@/icons/lni/Interface and Sign/cross-circle.svg?react';
 import { RedoOutlined } from '@ant-design/icons';
 import { gql } from '@apollo/client';
 import { Button, Input } from 'antd';
@@ -319,7 +319,7 @@ export default function ManualReviewRecentDecisions() {
   const getDecisionColorNamePairs = useCallback(
     (
       decision: RecentDecision,
-      isSelected: boolean,
+      _isSelected: boolean,
     ): { name: string; colorVariant: BadgeColorVariant }[] => {
       switch (decision.__typename) {
         case 'IgnoreDecisionComponent':
@@ -424,7 +424,7 @@ export default function ManualReviewRecentDecisions() {
           .map((decision) => getDecisionColorNamePairs(decision, isSelected))
           .flat(),
         policies: decisionData.decisions
-          // eslint-disable-next-line array-callback-return
+           
           .flatMap((decision) => getPoliciesFromDecision(decision)),
         reviewer: getReviewerName(decisionData.reviewerId),
         queue: getQueueName(decisionData.queueId),
@@ -654,7 +654,7 @@ export default function ManualReviewRecentDecisions() {
         queueIds: input.queueIds,
         startTime: input.dateRange?.startDate,
         endTime: input.dateRange?.endDate,
-        // eslint-disable-next-line array-callback-return
+         
         decisions: decisionOrActions?.map((it) => {
           switch (it.type) {
             case 'CUSTOM_ACTION':

@@ -36,6 +36,8 @@ export type Scalars = {
    * fields.
    */
   DateTime: Date | string;
+  /** Represents any JSON value (object, array, string, number, boolean, null). */
+  JSON: JsonValue;
   /** Represents an arbitrary json object. */
   JSONObject: JsonObject;
   /** Represents a string that must be non-empty. */
@@ -401,7 +403,7 @@ export type GQLConditionInputSignalInput = {
   readonly id: Scalars['ID'];
   readonly name?: InputMaybe<Scalars['String']>;
   readonly subcategory?: InputMaybe<Scalars['String']>;
-  readonly type: GQLSignalType;
+  readonly type: Scalars['String'];
 };
 
 export type GQLConditionMatchingValuesInput = {
@@ -682,6 +684,7 @@ export type GQLCreateContentRuleResponse =
 export type GQLCreateHashBankInput = {
   readonly description?: InputMaybe<Scalars['String']>;
   readonly enabled_ratio: Scalars['Float'];
+  readonly exchange?: InputMaybe<GQLExchangeConfigInput>;
   readonly name: Scalars['String'];
 };
 
@@ -1077,6 +1080,53 @@ export type GQLError = {
   readonly type: ReadonlyArray<Scalars['String']>;
 };
 
+export type GQLExchangeApiInfo = {
+  readonly __typename: 'ExchangeApiInfo';
+  readonly has_auth: Scalars['Boolean'];
+  readonly name: Scalars['String'];
+  readonly supports_auth: Scalars['Boolean'];
+};
+
+export type GQLExchangeApiSchema = {
+  readonly __typename: 'ExchangeApiSchema';
+  readonly config_schema: GQLExchangeSchemaSection;
+  readonly credentials_schema?: Maybe<GQLExchangeSchemaSection>;
+};
+
+export type GQLExchangeConfigInput = {
+  readonly api_name: Scalars['String'];
+  readonly config_json: Scalars['String'];
+  readonly credentials_json?: InputMaybe<Scalars['String']>;
+};
+
+export type GQLExchangeFieldDescriptor = {
+  readonly __typename: 'ExchangeFieldDescriptor';
+  readonly choices?: Maybe<ReadonlyArray<Scalars['String']>>;
+  readonly default?: Maybe<Scalars['JSON']>;
+  readonly help?: Maybe<Scalars['String']>;
+  readonly name: Scalars['String'];
+  readonly required: Scalars['Boolean'];
+  readonly type: Scalars['String'];
+};
+
+export type GQLExchangeInfo = {
+  readonly __typename: 'ExchangeInfo';
+  readonly api: Scalars['String'];
+  readonly enabled: Scalars['Boolean'];
+  readonly error?: Maybe<Scalars['String']>;
+  readonly fetched_items?: Maybe<Scalars['Int']>;
+  readonly has_auth: Scalars['Boolean'];
+  readonly is_fetching?: Maybe<Scalars['Boolean']>;
+  readonly last_fetch_succeeded?: Maybe<Scalars['Boolean']>;
+  readonly last_fetch_time?: Maybe<Scalars['String']>;
+  readonly up_to_date?: Maybe<Scalars['Boolean']>;
+};
+
+export type GQLExchangeSchemaSection = {
+  readonly __typename: 'ExchangeSchemaSection';
+  readonly fields: ReadonlyArray<GQLExchangeFieldDescriptor>;
+};
+
 export type GQLExecuteActionResponse = {
   readonly __typename: 'ExecuteActionResponse';
   readonly actionId: Scalars['String'];
@@ -1230,6 +1280,7 @@ export type GQLHashBank = {
   readonly __typename: 'HashBank';
   readonly description?: Maybe<Scalars['String']>;
   readonly enabled_ratio: Scalars['Float'];
+  readonly exchange?: Maybe<GQLExchangeInfo>;
   readonly hma_name: Scalars['String'];
   readonly id: Scalars['ID'];
   readonly name: Scalars['String'];
@@ -1260,6 +1311,7 @@ export type GQLIntegration =
 export type GQLIntegrationApiCredential =
   | GQLGoogleContentSafetyApiIntegrationApiCredential
   | GQLOpenAiIntegrationApiCredential
+  | GQLPluginIntegrationApiCredential
   | GQLZentropiIntegrationApiCredential;
 
 export type GQLIntegrationApiCredentialInput = {
@@ -1271,7 +1323,14 @@ export type GQLIntegrationApiCredentialInput = {
 export type GQLIntegrationConfig = {
   readonly __typename: 'IntegrationConfig';
   readonly apiCredential: GQLIntegrationApiCredential;
-  readonly name: GQLIntegration;
+  readonly docsUrl: Scalars['String'];
+  readonly logoUrl?: Maybe<Scalars['String']>;
+  readonly logoWithBackgroundUrl?: Maybe<Scalars['String']>;
+  readonly modelCard: GQLModelCard;
+  readonly modelCardLearnMoreUrl?: Maybe<Scalars['String']>;
+  readonly name: Scalars['String'];
+  readonly requiresConfig: Scalars['Boolean'];
+  readonly title: Scalars['String'];
 };
 
 export type GQLIntegrationConfigQueryResponse =
@@ -1311,6 +1370,16 @@ export type GQLIntegrationEmptyInputCredentialsError = GQLError & {
   readonly status: Scalars['Int'];
   readonly title: Scalars['String'];
   readonly type: ReadonlyArray<Scalars['String']>;
+};
+
+export type GQLIntegrationMetadata = {
+  readonly __typename: 'IntegrationMetadata';
+  readonly docsUrl: Scalars['String'];
+  readonly logoUrl?: Maybe<Scalars['String']>;
+  readonly logoWithBackgroundUrl?: Maybe<Scalars['String']>;
+  readonly name: Scalars['String'];
+  readonly requiresConfig: Scalars['Boolean'];
+  readonly title: Scalars['String'];
 };
 
 export type GQLIntegrationNoInputCredentialsError = GQLError & {
@@ -2095,6 +2164,34 @@ export const GQLMetricsTimeDivisionOptions = {
 
 export type GQLMetricsTimeDivisionOptions =
   (typeof GQLMetricsTimeDivisionOptions)[keyof typeof GQLMetricsTimeDivisionOptions];
+export type GQLModelCard = {
+  readonly __typename: 'ModelCard';
+  readonly modelName: Scalars['String'];
+  readonly releaseDate?: Maybe<Scalars['String']>;
+  readonly sections?: Maybe<ReadonlyArray<GQLModelCardSection>>;
+  readonly version: Scalars['String'];
+};
+
+export type GQLModelCardField = {
+  readonly __typename: 'ModelCardField';
+  readonly label: Scalars['String'];
+  readonly value: Scalars['String'];
+};
+
+export type GQLModelCardSection = {
+  readonly __typename: 'ModelCardSection';
+  readonly fields?: Maybe<ReadonlyArray<GQLModelCardField>>;
+  readonly id: Scalars['String'];
+  readonly subsections?: Maybe<ReadonlyArray<GQLModelCardSubsection>>;
+  readonly title: Scalars['String'];
+};
+
+export type GQLModelCardSubsection = {
+  readonly __typename: 'ModelCardSubsection';
+  readonly fields: ReadonlyArray<GQLModelCardField>;
+  readonly title: Scalars['String'];
+};
+
 export type GQLModeratorSafetySettingsInput = {
   readonly moderatorSafetyBlurLevel: Scalars['Int'];
   readonly moderatorSafetyGrayscale: Scalars['Boolean'];
@@ -2153,6 +2250,7 @@ export type GQLMutateHashBankResponse =
 export type GQLMutateHashBankSuccessResponse = {
   readonly __typename: 'MutateHashBankSuccessResponse';
   readonly data: GQLHashBank;
+  readonly warning?: Maybe<Scalars['String']>;
 };
 
 export type GQLMutateLocationBankResponse =
@@ -2268,6 +2366,7 @@ export type GQLMutation = {
   readonly setModeratorSafetySettings?: Maybe<GQLSetModeratorSafetySettingsSuccessResponse>;
   readonly setMrtChartConfigurationSettings?: Maybe<GQLSetMrtChartConfigurationSettingsSuccessResponse>;
   readonly setOrgDefaultSafetySettings?: Maybe<GQLSetModeratorSafetySettingsSuccessResponse>;
+  readonly setPluginIntegrationConfig: GQLSetIntegrationConfigResponse;
   readonly signUp: GQLSignUpResponse;
   readonly submitManualReviewDecision: GQLSubmitDecisionResponse;
   readonly updateAccountInfo?: Maybe<Scalars['Boolean']>;
@@ -2275,6 +2374,7 @@ export type GQLMutation = {
   readonly updateAppealSettings: GQLAppealSettings;
   readonly updateContentItemType: GQLMutateContentItemTypeResponse;
   readonly updateContentRule: GQLUpdateContentRuleResponse;
+  readonly updateExchangeCredentials: Scalars['Boolean'];
   readonly updateHashBank: GQLMutateHashBankResponse;
   readonly updateLocationBank: GQLMutateLocationBankResponse;
   readonly updateManualReviewQueue: GQLUpdateManualReviewQueueQueueResponse;
@@ -2520,6 +2620,10 @@ export type GQLMutationSetOrgDefaultSafetySettingsArgs = {
   orgDefaultSafetySettings: GQLModeratorSafetySettingsInput;
 };
 
+export type GQLMutationSetPluginIntegrationConfigArgs = {
+  input: GQLSetPluginIntegrationConfigInput;
+};
+
 export type GQLMutationSignUpArgs = {
   input: GQLSignUpInput;
 };
@@ -2547,6 +2651,11 @@ export type GQLMutationUpdateContentItemTypeArgs = {
 
 export type GQLMutationUpdateContentRuleArgs = {
   input: GQLUpdateContentRuleInput;
+};
+
+export type GQLMutationUpdateExchangeCredentialsArgs = {
+  apiName: Scalars['String'];
+  credentialsJson: Scalars['String'];
 };
 
 export type GQLMutationUpdateHashBankArgs = {
@@ -2969,6 +3078,11 @@ export type GQLPlaceBoundsInput = {
   readonly southwestCorner: GQLLatLngInput;
 };
 
+export type GQLPluginIntegrationApiCredential = {
+  readonly __typename: 'PluginIntegrationApiCredential';
+  readonly credential: Scalars['JSONObject'];
+};
+
 export type GQLPolicy = {
   readonly __typename: 'Policy';
   readonly applyUserStrikeCountConfigToChildren?: Maybe<Scalars['Boolean']>;
@@ -3034,9 +3148,12 @@ export type GQLQuery = {
   readonly action?: Maybe<GQLAction>;
   readonly actionStatistics: ReadonlyArray<GQLActionData>;
   readonly allOrgs: ReadonlyArray<GQLOrg>;
-  readonly allRuleInsights: GQLAllRuleInsights;
+  readonly allRuleInsights?: Maybe<GQLAllRuleInsights>;
   readonly apiKey: Scalars['String'];
   readonly appealSettings?: Maybe<GQLAppealSettings>;
+  readonly availableIntegrations: ReadonlyArray<GQLIntegrationMetadata>;
+  readonly exchangeApiSchema?: Maybe<GQLExchangeApiSchema>;
+  readonly exchangeApis: ReadonlyArray<GQLExchangeApiInfo>;
   readonly getCommentsForJob: ReadonlyArray<GQLManualReviewJobComment>;
   readonly getDecidedJob?: Maybe<GQLManualReviewJob>;
   readonly getDecidedJobFromJobId?: Maybe<GQLManualReviewJobWithDecisions>;
@@ -3061,6 +3178,7 @@ export type GQLQuery = {
   readonly hashBanks: ReadonlyArray<GQLHashBank>;
   readonly integrationConfig: GQLIntegrationConfigQueryResponse;
   readonly inviteUserToken: GQLInviteUserTokenResponse;
+  readonly isWarehouseAvailable: Scalars['Boolean'];
   readonly itemActionHistory: ReadonlyArray<GQLItemAction>;
   readonly itemSubmissions: ReadonlyArray<GQLItemSubmissions>;
   readonly itemType?: Maybe<GQLItemType>;
@@ -3099,6 +3217,10 @@ export type GQLQueryActionArgs = {
 
 export type GQLQueryActionStatisticsArgs = {
   input: GQLActionStatisticsInput;
+};
+
+export type GQLQueryExchangeApiSchemaArgs = {
+  apiName: Scalars['String'];
 };
 
 export type GQLQueryGetCommentsForJobArgs = {
@@ -3179,7 +3301,7 @@ export type GQLQueryHashBankByIdArgs = {
 };
 
 export type GQLQueryIntegrationConfigArgs = {
-  name: GQLIntegration;
+  name: Scalars['String'];
 };
 
 export type GQLQueryInviteUserTokenArgs = {
@@ -3854,6 +3976,11 @@ export type GQLSetMrtChartConfigurationSettingsSuccessResponse = {
   readonly _?: Maybe<Scalars['Boolean']>;
 };
 
+export type GQLSetPluginIntegrationConfigInput = {
+  readonly credential: Scalars['JSONObject'];
+  readonly integrationId: Scalars['String'];
+};
+
 export type GQLSetUserStrikeThresholdInput = {
   readonly actions: ReadonlyArray<Scalars['String']>;
   readonly threshold: Scalars['Int'];
@@ -3902,7 +4029,13 @@ export type GQLSignal = {
   readonly eligibleInputs: ReadonlyArray<GQLSignalInputType>;
   readonly eligibleSubcategories: ReadonlyArray<GQLSignalSubcategory>;
   readonly id: Scalars['ID'];
-  readonly integration?: Maybe<GQLIntegration>;
+  readonly integration?: Maybe<Scalars['String']>;
+  /** Logo URL for the integration. Null if not set or when signal has no integration. */
+  readonly integrationLogoUrl?: Maybe<Scalars['String']>;
+  /** Logo-with-background URL for the integration. Null if not set or when signal has no integration. */
+  readonly integrationLogoWithBackgroundUrl?: Maybe<Scalars['String']>;
+  /** Display name for the signal’s integration (from registry manifest). Null when signal has no integration. */
+  readonly integrationTitle?: Maybe<Scalars['String']>;
   readonly name: Scalars['String'];
   readonly outputType: GQLSignalOutputType;
   readonly pricingStructure: GQLSignalPricingStructure;
@@ -3910,7 +4043,7 @@ export type GQLSignal = {
   readonly shouldPromptForMatchingValues: Scalars['Boolean'];
   readonly subcategory?: Maybe<Scalars['String']>;
   readonly supportedLanguages: GQLSupportedLanguages;
-  readonly type: GQLSignalType;
+  readonly type: Scalars['String'];
 };
 
 export type GQLSignalArgs = GQLAggregationSignalArgs;
@@ -4007,7 +4140,7 @@ export const GQLSignalType = {
 export type GQLSignalType = (typeof GQLSignalType)[keyof typeof GQLSignalType];
 export type GQLSignalWithScore = {
   readonly __typename: 'SignalWithScore';
-  readonly integration?: Maybe<GQLIntegration>;
+  readonly integration?: Maybe<Scalars['String']>;
   readonly score: Scalars['String'];
   readonly signalName: Scalars['String'];
   readonly subcategory?: Maybe<Scalars['String']>;
@@ -4841,6 +4974,65 @@ export type GQLHashBankByIdQuery = {
     readonly hma_name: string;
     readonly enabled_ratio: number;
     readonly org_id: string;
+    readonly exchange?: {
+      readonly __typename: 'ExchangeInfo';
+      readonly api: string;
+      readonly enabled: boolean;
+      readonly has_auth: boolean;
+      readonly error?: string | null;
+      readonly last_fetch_succeeded?: boolean | null;
+      readonly last_fetch_time?: string | null;
+      readonly up_to_date?: boolean | null;
+      readonly fetched_items?: number | null;
+      readonly is_fetching?: boolean | null;
+    } | null;
+  } | null;
+};
+
+export type GQLExchangeApisQueryVariables = Exact<{ [key: string]: never }>;
+
+export type GQLExchangeApisQuery = {
+  readonly __typename: 'Query';
+  readonly exchangeApis: ReadonlyArray<{
+    readonly __typename: 'ExchangeApiInfo';
+    readonly name: string;
+    readonly supports_auth: boolean;
+    readonly has_auth: boolean;
+  }>;
+};
+
+export type GQLExchangeApiSchemaQueryVariables = Exact<{
+  apiName: Scalars['String'];
+}>;
+
+export type GQLExchangeApiSchemaQuery = {
+  readonly __typename: 'Query';
+  readonly exchangeApiSchema?: {
+    readonly __typename: 'ExchangeApiSchema';
+    readonly config_schema: {
+      readonly __typename: 'ExchangeSchemaSection';
+      readonly fields: ReadonlyArray<{
+        readonly __typename: 'ExchangeFieldDescriptor';
+        readonly name: string;
+        readonly type: string;
+        readonly required: boolean;
+        readonly default?: JsonValue | null;
+        readonly help?: string | null;
+        readonly choices?: ReadonlyArray<string> | null;
+      }>;
+    };
+    readonly credentials_schema?: {
+      readonly __typename: 'ExchangeSchemaSection';
+      readonly fields: ReadonlyArray<{
+        readonly __typename: 'ExchangeFieldDescriptor';
+        readonly name: string;
+        readonly type: string;
+        readonly required: boolean;
+        readonly default?: JsonValue | null;
+        readonly help?: string | null;
+        readonly choices?: ReadonlyArray<string> | null;
+      }>;
+    } | null;
   } | null;
 };
 
@@ -4862,6 +5054,7 @@ export type GQLCreateHashBankMutation = {
       }
     | {
         readonly __typename: 'MutateHashBankSuccessResponse';
+        readonly warning?: string | null;
         readonly data: {
           readonly __typename: 'HashBank';
           readonly id: string;
@@ -4911,6 +5104,16 @@ export type GQLDeleteHashBankMutationVariables = Exact<{
 export type GQLDeleteHashBankMutation = {
   readonly __typename: 'Mutation';
   readonly deleteHashBank: boolean;
+};
+
+export type GQLUpdateExchangeCredentialsMutationVariables = Exact<{
+  apiName: Scalars['String'];
+  credentialsJson: Scalars['String'];
+}>;
+
+export type GQLUpdateExchangeCredentialsMutation = {
+  readonly __typename: 'Mutation';
+  readonly updateExchangeCredentials: boolean;
 };
 
 export type GQLUserAndOrgQueryVariables = Exact<{ [key: string]: never }>;
@@ -5655,13 +5858,41 @@ export type GQLSetIntegrationConfigMutation = {
         readonly __typename: 'SetIntegrationConfigSuccessResponse';
         readonly config: {
           readonly __typename: 'IntegrationConfig';
-          readonly name: GQLIntegration;
+          readonly name: string;
+        };
+      };
+};
+
+export type GQLSetPluginIntegrationConfigMutationVariables = Exact<{
+  input: GQLSetPluginIntegrationConfigInput;
+}>;
+
+export type GQLSetPluginIntegrationConfigMutation = {
+  readonly __typename: 'Mutation';
+  readonly setPluginIntegrationConfig:
+    | {
+        readonly __typename: 'IntegrationConfigTooManyCredentialsError';
+        readonly title: string;
+      }
+    | {
+        readonly __typename: 'IntegrationEmptyInputCredentialsError';
+        readonly title: string;
+      }
+    | {
+        readonly __typename: 'IntegrationNoInputCredentialsError';
+        readonly title: string;
+      }
+    | {
+        readonly __typename: 'SetIntegrationConfigSuccessResponse';
+        readonly config: {
+          readonly __typename: 'IntegrationConfig';
+          readonly name: string;
         };
       };
 };
 
 export type GQLIntegrationConfigQueryVariables = Exact<{
-  name: GQLIntegration;
+  name: Scalars['String'];
 }>;
 
 export type GQLIntegrationConfigQuery = {
@@ -5671,7 +5902,38 @@ export type GQLIntegrationConfigQuery = {
         readonly __typename: 'IntegrationConfigSuccessResult';
         readonly config?: {
           readonly __typename: 'IntegrationConfig';
-          readonly name: GQLIntegration;
+          readonly name: string;
+          readonly title: string;
+          readonly docsUrl: string;
+          readonly requiresConfig: boolean;
+          readonly logoUrl?: string | null;
+          readonly logoWithBackgroundUrl?: string | null;
+          readonly modelCardLearnMoreUrl?: string | null;
+          readonly modelCard: {
+            readonly __typename: 'ModelCard';
+            readonly modelName: string;
+            readonly version: string;
+            readonly releaseDate?: string | null;
+            readonly sections?: ReadonlyArray<{
+              readonly __typename: 'ModelCardSection';
+              readonly id: string;
+              readonly title: string;
+              readonly subsections?: ReadonlyArray<{
+                readonly __typename: 'ModelCardSubsection';
+                readonly title: string;
+                readonly fields: ReadonlyArray<{
+                  readonly __typename: 'ModelCardField';
+                  readonly label: string;
+                  readonly value: string;
+                }>;
+              }> | null;
+              readonly fields?: ReadonlyArray<{
+                readonly __typename: 'ModelCardField';
+                readonly label: string;
+                readonly value: string;
+              }> | null;
+            }> | null;
+          };
           readonly apiCredential:
             | {
                 readonly __typename: 'GoogleContentSafetyApiIntegrationApiCredential';
@@ -5680,6 +5942,10 @@ export type GQLIntegrationConfigQuery = {
             | {
                 readonly __typename: 'OpenAiIntegrationApiCredential';
                 readonly apiKey: string;
+              }
+            | {
+                readonly __typename: 'PluginIntegrationApiCredential';
+                readonly credential: JsonObject;
               }
             | {
                 readonly __typename: 'ZentropiIntegrationApiCredential';
@@ -5706,9 +5972,26 @@ export type GQLMyIntegrationsQuery = {
     readonly __typename: 'Org';
     readonly integrationConfigs: ReadonlyArray<{
       readonly __typename: 'IntegrationConfig';
-      readonly name: GQLIntegration;
+      readonly name: string;
     }>;
   } | null;
+};
+
+export type GQLAvailableIntegrationsQueryVariables = Exact<{
+  [key: string]: never;
+}>;
+
+export type GQLAvailableIntegrationsQuery = {
+  readonly __typename: 'Query';
+  readonly availableIntegrations: ReadonlyArray<{
+    readonly __typename: 'IntegrationMetadata';
+    readonly name: string;
+    readonly title: string;
+    readonly docsUrl: string;
+    readonly requiresConfig: boolean;
+    readonly logoUrl?: string | null;
+    readonly logoWithBackgroundUrl?: string | null;
+  }>;
 };
 
 export type GQLInvestigationItemTypesQueryVariables = Exact<{
@@ -6431,7 +6714,7 @@ export type GQLInvestigationItemsQuery = {
                         readonly signal?: {
                           readonly __typename: 'Signal';
                           readonly id: string;
-                          readonly type: GQLSignalType;
+                          readonly type: string;
                           readonly name: string;
                           readonly subcategory?: string | null;
                           readonly args?: {
@@ -6508,7 +6791,7 @@ export type GQLInvestigationItemsQuery = {
                   readonly signal?: {
                     readonly __typename: 'Signal';
                     readonly id: string;
-                    readonly type: GQLSignalType;
+                    readonly type: string;
                     readonly name: string;
                     readonly subcategory?: string | null;
                     readonly args?: {
@@ -16936,7 +17219,7 @@ export type GQLManualReviewQueueRoutingRulesQuery = {
                     readonly signal?: {
                       readonly __typename: 'Signal';
                       readonly id: string;
-                      readonly type: GQLSignalType;
+                      readonly type: string;
                       readonly name: string;
                       readonly subcategory?: string | null;
                       readonly args?: {
@@ -17012,7 +17295,7 @@ export type GQLManualReviewQueueRoutingRulesQuery = {
               readonly signal?: {
                 readonly __typename: 'Signal';
                 readonly id: string;
-                readonly type: GQLSignalType;
+                readonly type: string;
                 readonly name: string;
                 readonly subcategory?: string | null;
                 readonly args?: {
@@ -17284,7 +17567,7 @@ export type GQLManualReviewQueueRoutingRulesQuery = {
                     readonly signal?: {
                       readonly __typename: 'Signal';
                       readonly id: string;
-                      readonly type: GQLSignalType;
+                      readonly type: string;
                       readonly name: string;
                       readonly subcategory?: string | null;
                       readonly args?: {
@@ -17360,7 +17643,7 @@ export type GQLManualReviewQueueRoutingRulesQuery = {
               readonly signal?: {
                 readonly __typename: 'Signal';
                 readonly id: string;
-                readonly type: GQLSignalType;
+                readonly type: string;
                 readonly name: string;
                 readonly subcategory?: string | null;
                 readonly args?: {
@@ -17413,9 +17696,12 @@ export type GQLManualReviewQueueRoutingRulesQuery = {
     readonly signals: ReadonlyArray<{
       readonly __typename: 'Signal';
       readonly id: string;
-      readonly type: GQLSignalType;
+      readonly type: string;
       readonly name: string;
-      readonly integration?: GQLIntegration | null;
+      readonly integration?: string | null;
+      readonly integrationTitle?: string | null;
+      readonly integrationLogoUrl?: string | null;
+      readonly integrationLogoWithBackgroundUrl?: string | null;
       readonly docsUrl?: string | null;
       readonly description: string;
       readonly eligibleInputs: ReadonlyArray<GQLSignalInputType>;
@@ -17942,6 +18228,15 @@ export type GQLGetNcmecReportQuery = {
   } | null;
 };
 
+export type GQLIsWarehouseAvailableQueryVariables = Exact<{
+  [key: string]: never;
+}>;
+
+export type GQLIsWarehouseAvailableQuery = {
+  readonly __typename: 'Query';
+  readonly isWarehouseAvailable: boolean;
+};
+
 export type GQLTotalPendingJobsQueryVariables = Exact<{ [key: string]: never }>;
 
 export type GQLTotalPendingJobsQuery = {
@@ -18410,7 +18705,7 @@ export type GQLRulesQuery = {
                         readonly signal?: {
                           readonly __typename: 'Signal';
                           readonly id: string;
-                          readonly type: GQLSignalType;
+                          readonly type: string;
                           readonly name: string;
                           readonly subcategory?: string | null;
                           readonly args?: {
@@ -18486,7 +18781,7 @@ export type GQLRulesQuery = {
                   readonly signal?: {
                     readonly __typename: 'Signal';
                     readonly id: string;
-                    readonly type: GQLSignalType;
+                    readonly type: string;
                     readonly name: string;
                     readonly subcategory?: string | null;
                     readonly args?: {
@@ -18610,7 +18905,7 @@ export type GQLRulesQuery = {
                         readonly signal?: {
                           readonly __typename: 'Signal';
                           readonly id: string;
-                          readonly type: GQLSignalType;
+                          readonly type: string;
                           readonly name: string;
                           readonly subcategory?: string | null;
                           readonly args?: {
@@ -18686,7 +18981,7 @@ export type GQLRulesQuery = {
                   readonly signal?: {
                     readonly __typename: 'Signal';
                     readonly id: string;
-                    readonly type: GQLSignalType;
+                    readonly type: string;
                     readonly name: string;
                     readonly subcategory?: string | null;
                     readonly args?: {
@@ -18813,7 +19108,7 @@ export type GQLRulesDashboardInsightsQueryVariables = Exact<{
 
 export type GQLRulesDashboardInsightsQuery = {
   readonly __typename: 'Query';
-  readonly allRuleInsights: {
+  readonly allRuleInsights?: {
     readonly __typename: 'AllRuleInsights';
     readonly actionedSubmissionsByPolicyByDay: ReadonlyArray<{
       readonly __typename: 'CountByPolicyByDay';
@@ -18850,7 +19145,7 @@ export type GQLRulesDashboardInsightsQuery = {
       readonly date: Date | string;
       readonly count: number;
     }>;
-  };
+  } | null;
 };
 
 export type GQLPolicyRollupDataQueryVariables = Exact<{ [key: string]: never }>;
@@ -18958,7 +19253,7 @@ export type GQLSpotTestRuleQuery = {
                   readonly signal?: {
                     readonly __typename: 'Signal';
                     readonly id: string;
-                    readonly type: GQLSignalType;
+                    readonly type: string;
                     readonly name: string;
                     readonly subcategory?: string | null;
                     readonly args?: {
@@ -19035,7 +19330,7 @@ export type GQLSpotTestRuleQuery = {
             readonly signal?: {
               readonly __typename: 'Signal';
               readonly id: string;
-              readonly type: GQLSignalType;
+              readonly type: string;
               readonly name: string;
               readonly subcategory?: string | null;
               readonly args?: {
@@ -19098,7 +19393,7 @@ export type GQLSpotTestRuleQuery = {
     readonly signalResults?: ReadonlyArray<{
       readonly __typename: 'SignalWithScore';
       readonly signalName: string;
-      readonly integration?: GQLIntegration | null;
+      readonly integration?: string | null;
       readonly subcategory?: string | null;
       readonly score: string;
     }> | null;
@@ -19152,7 +19447,7 @@ export type GQLSampleReportingRuleExecutionResultFieldsFragment = {
   readonly signalResults?: ReadonlyArray<{
     readonly __typename: 'SignalWithScore';
     readonly signalName: string;
-    readonly integration?: GQLIntegration | null;
+    readonly integration?: string | null;
     readonly subcategory?: string | null;
     readonly score: string;
   }> | null;
@@ -19231,7 +19526,7 @@ export type GQLReportingRuleInsightsCurrentVersionSamplesQuery = {
         readonly signalResults?: ReadonlyArray<{
           readonly __typename: 'SignalWithScore';
           readonly signalName: string;
-          readonly integration?: GQLIntegration | null;
+          readonly integration?: string | null;
           readonly subcategory?: string | null;
           readonly score: string;
         }> | null;
@@ -19311,7 +19606,7 @@ export type GQLReportingRuleInsightsPriorVersionSamplesQuery = {
         readonly signalResults?: ReadonlyArray<{
           readonly __typename: 'SignalWithScore';
           readonly signalName: string;
-          readonly integration?: GQLIntegration | null;
+          readonly integration?: string | null;
           readonly subcategory?: string | null;
           readonly score: string;
         }> | null;
@@ -19352,14 +19647,14 @@ export type GQLRulePassRateAnalyticsQuery = {
         };
       }
     | null;
-  readonly allRuleInsights: {
+  readonly allRuleInsights?: {
     readonly __typename: 'AllRuleInsights';
     readonly totalSubmissionsByDay: ReadonlyArray<{
       readonly __typename: 'CountByDay';
       readonly date: Date | string;
       readonly count: number;
     }>;
-  };
+  } | null;
 };
 
 export type GQLLeafConditionWithResultFieldsFragment = {
@@ -19379,7 +19674,7 @@ export type GQLLeafConditionWithResultFieldsFragment = {
   readonly signal?: {
     readonly __typename: 'Signal';
     readonly id: string;
-    readonly type: GQLSignalType;
+    readonly type: string;
     readonly name: string;
     readonly subcategory?: string | null;
     readonly args?: { readonly __typename: 'AggregationSignalArgs' } | null;
@@ -19443,7 +19738,7 @@ export type GQLSampleRuleExecutionResultFieldsFragment = {
   readonly signalResults?: ReadonlyArray<{
     readonly __typename: 'SignalWithScore';
     readonly signalName: string;
-    readonly integration?: GQLIntegration | null;
+    readonly integration?: string | null;
     readonly subcategory?: string | null;
     readonly score: string;
   }> | null;
@@ -19475,7 +19770,7 @@ export type GQLSampleRuleExecutionResultConditionResultFieldsFragment = {
               readonly signal?: {
                 readonly __typename: 'Signal';
                 readonly id: string;
-                readonly type: GQLSignalType;
+                readonly type: string;
                 readonly name: string;
                 readonly subcategory?: string | null;
                 readonly args?: {
@@ -19552,7 +19847,7 @@ export type GQLSampleRuleExecutionResultConditionResultFieldsFragment = {
         readonly signal?: {
           readonly __typename: 'Signal';
           readonly id: string;
-          readonly type: GQLSignalType;
+          readonly type: string;
           readonly name: string;
           readonly subcategory?: string | null;
           readonly args?: {
@@ -19624,7 +19919,7 @@ export type GQLRuleInsightsTableAllSignalsQuery = {
     readonly signals: ReadonlyArray<{
       readonly __typename: 'Signal';
       readonly id: string;
-      readonly integration?: GQLIntegration | null;
+      readonly integration?: string | null;
       readonly eligibleSubcategories: ReadonlyArray<{
         readonly __typename: 'SignalSubcategory';
         readonly id: string;
@@ -19659,7 +19954,7 @@ export type GQLRuleInsightsCurrentVersionSamplesQuery = {
             readonly signalResults?: ReadonlyArray<{
               readonly __typename: 'SignalWithScore';
               readonly signalName: string;
-              readonly integration?: GQLIntegration | null;
+              readonly integration?: string | null;
               readonly subcategory?: string | null;
               readonly score: string;
             }> | null;
@@ -19731,7 +20026,7 @@ export type GQLRuleInsightsCurrentVersionSamplesQuery = {
             readonly signalResults?: ReadonlyArray<{
               readonly __typename: 'SignalWithScore';
               readonly signalName: string;
-              readonly integration?: GQLIntegration | null;
+              readonly integration?: string | null;
               readonly subcategory?: string | null;
               readonly score: string;
             }> | null;
@@ -19766,7 +20061,7 @@ export type GQLRuleInsightsPriorVersionSamplesQuery = {
             readonly signalResults?: ReadonlyArray<{
               readonly __typename: 'SignalWithScore';
               readonly signalName: string;
-              readonly integration?: GQLIntegration | null;
+              readonly integration?: string | null;
               readonly subcategory?: string | null;
               readonly score: string;
             }> | null;
@@ -19868,7 +20163,7 @@ export type GQLRuleInsightsPriorVersionSamplesQuery = {
             readonly signalResults?: ReadonlyArray<{
               readonly __typename: 'SignalWithScore';
               readonly signalName: string;
-              readonly integration?: GQLIntegration | null;
+              readonly integration?: string | null;
               readonly subcategory?: string | null;
               readonly score: string;
             }> | null;
@@ -19922,7 +20217,7 @@ export type GQLGetFullResultForRuleQuery = {
                       readonly signal?: {
                         readonly __typename: 'Signal';
                         readonly id: string;
-                        readonly type: GQLSignalType;
+                        readonly type: string;
                         readonly name: string;
                         readonly subcategory?: string | null;
                         readonly args?: {
@@ -19999,7 +20294,7 @@ export type GQLGetFullResultForRuleQuery = {
                 readonly signal?: {
                   readonly __typename: 'Signal';
                   readonly id: string;
-                  readonly type: GQLSignalType;
+                  readonly type: string;
                   readonly name: string;
                   readonly subcategory?: string | null;
                   readonly args?: {
@@ -20062,7 +20357,7 @@ export type GQLGetFullResultForRuleQuery = {
         readonly signalResults?: ReadonlyArray<{
           readonly __typename: 'SignalWithScore';
           readonly signalName: string;
-          readonly integration?: GQLIntegration | null;
+          readonly integration?: string | null;
           readonly subcategory?: string | null;
           readonly score: string;
         }> | null;
@@ -20149,7 +20444,7 @@ export type GQLReportingRuleFormRuleFieldsFragmentFragment = {
                 readonly signal?: {
                   readonly __typename: 'Signal';
                   readonly id: string;
-                  readonly type: GQLSignalType;
+                  readonly type: string;
                   readonly name: string;
                   readonly subcategory?: string | null;
                   readonly args?: {
@@ -20225,7 +20520,7 @@ export type GQLReportingRuleFormRuleFieldsFragmentFragment = {
           readonly signal?: {
             readonly __typename: 'Signal';
             readonly id: string;
-            readonly type: GQLSignalType;
+            readonly type: string;
             readonly name: string;
             readonly subcategory?: string | null;
             readonly args?: {
@@ -20598,7 +20893,7 @@ export type GQLReportingRuleQuery = {
                   readonly signal?: {
                     readonly __typename: 'Signal';
                     readonly id: string;
-                    readonly type: GQLSignalType;
+                    readonly type: string;
                     readonly name: string;
                     readonly subcategory?: string | null;
                     readonly args?: {
@@ -20674,7 +20969,7 @@ export type GQLReportingRuleQuery = {
             readonly signal?: {
               readonly __typename: 'Signal';
               readonly id: string;
-              readonly type: GQLSignalType;
+              readonly type: string;
               readonly name: string;
               readonly subcategory?: string | null;
               readonly args?: {
@@ -21008,9 +21303,12 @@ export type GQLReportingRuleFormOrgDataQuery = {
     readonly signals: ReadonlyArray<{
       readonly __typename: 'Signal';
       readonly id: string;
-      readonly type: GQLSignalType;
+      readonly type: string;
       readonly name: string;
-      readonly integration?: GQLIntegration | null;
+      readonly integration?: string | null;
+      readonly integrationTitle?: string | null;
+      readonly integrationLogoUrl?: string | null;
+      readonly integrationLogoWithBackgroundUrl?: string | null;
       readonly docsUrl?: string | null;
       readonly description: string;
       readonly eligibleInputs: ReadonlyArray<GQLSignalInputType>;
@@ -21371,9 +21669,12 @@ export type GQLItemTypeFragmentFragment =
 export type GQLSignalsFragmentFragment = {
   readonly __typename: 'Signal';
   readonly id: string;
-  readonly type: GQLSignalType;
+  readonly type: string;
   readonly name: string;
-  readonly integration?: GQLIntegration | null;
+  readonly integration?: string | null;
+  readonly integrationTitle?: string | null;
+  readonly integrationLogoUrl?: string | null;
+  readonly integrationLogoWithBackgroundUrl?: string | null;
   readonly docsUrl?: string | null;
   readonly description: string;
   readonly eligibleInputs: ReadonlyArray<GQLSignalInputType>;
@@ -21451,7 +21752,7 @@ export type GQLLeafConditionFieldsFragment = {
   readonly signal?: {
     readonly __typename: 'Signal';
     readonly id: string;
-    readonly type: GQLSignalType;
+    readonly type: string;
     readonly name: string;
     readonly subcategory?: string | null;
     readonly args?: { readonly __typename: 'AggregationSignalArgs' } | null;
@@ -21533,7 +21834,7 @@ export type GQLConditionSetFieldsFragment = {
               readonly signal?: {
                 readonly __typename: 'Signal';
                 readonly id: string;
-                readonly type: GQLSignalType;
+                readonly type: string;
                 readonly name: string;
                 readonly subcategory?: string | null;
                 readonly args?: {
@@ -21609,7 +21910,7 @@ export type GQLConditionSetFieldsFragment = {
         readonly signal?: {
           readonly __typename: 'Signal';
           readonly id: string;
-          readonly type: GQLSignalType;
+          readonly type: string;
           readonly name: string;
           readonly subcategory?: string | null;
           readonly args?: {
@@ -21708,7 +22009,7 @@ type GQLRuleFormRuleFieldsFragmentContentRuleFragment = {
                 readonly signal?: {
                   readonly __typename: 'Signal';
                   readonly id: string;
-                  readonly type: GQLSignalType;
+                  readonly type: string;
                   readonly name: string;
                   readonly subcategory?: string | null;
                   readonly args?: {
@@ -21784,7 +22085,7 @@ type GQLRuleFormRuleFieldsFragmentContentRuleFragment = {
           readonly signal?: {
             readonly __typename: 'Signal';
             readonly id: string;
-            readonly type: GQLSignalType;
+            readonly type: string;
             readonly name: string;
             readonly subcategory?: string | null;
             readonly args?: {
@@ -21978,7 +22279,7 @@ type GQLRuleFormRuleFieldsFragmentUserRuleFragment = {
                 readonly signal?: {
                   readonly __typename: 'Signal';
                   readonly id: string;
-                  readonly type: GQLSignalType;
+                  readonly type: string;
                   readonly name: string;
                   readonly subcategory?: string | null;
                   readonly args?: {
@@ -22054,7 +22355,7 @@ type GQLRuleFormRuleFieldsFragmentUserRuleFragment = {
           readonly signal?: {
             readonly __typename: 'Signal';
             readonly id: string;
-            readonly type: GQLSignalType;
+            readonly type: string;
             readonly name: string;
             readonly subcategory?: string | null;
             readonly args?: {
@@ -22435,7 +22736,7 @@ export type GQLRuleQuery = {
                       readonly signal?: {
                         readonly __typename: 'Signal';
                         readonly id: string;
-                        readonly type: GQLSignalType;
+                        readonly type: string;
                         readonly name: string;
                         readonly subcategory?: string | null;
                         readonly args?: {
@@ -22511,7 +22812,7 @@ export type GQLRuleQuery = {
                 readonly signal?: {
                   readonly __typename: 'Signal';
                   readonly id: string;
-                  readonly type: GQLSignalType;
+                  readonly type: string;
                   readonly name: string;
                   readonly subcategory?: string | null;
                   readonly args?: {
@@ -22704,7 +23005,7 @@ export type GQLRuleQuery = {
                       readonly signal?: {
                         readonly __typename: 'Signal';
                         readonly id: string;
-                        readonly type: GQLSignalType;
+                        readonly type: string;
                         readonly name: string;
                         readonly subcategory?: string | null;
                         readonly args?: {
@@ -22780,7 +23081,7 @@ export type GQLRuleQuery = {
                 readonly signal?: {
                   readonly __typename: 'Signal';
                   readonly id: string;
-                  readonly type: GQLSignalType;
+                  readonly type: string;
                   readonly name: string;
                   readonly subcategory?: string | null;
                   readonly args?: {
@@ -23311,9 +23612,12 @@ export type GQLContentRuleFormConfigQuery = {
     readonly signals: ReadonlyArray<{
       readonly __typename: 'Signal';
       readonly id: string;
-      readonly type: GQLSignalType;
+      readonly type: string;
       readonly name: string;
-      readonly integration?: GQLIntegration | null;
+      readonly integration?: string | null;
+      readonly integrationTitle?: string | null;
+      readonly integrationLogoUrl?: string | null;
+      readonly integrationLogoWithBackgroundUrl?: string | null;
       readonly docsUrl?: string | null;
       readonly description: string;
       readonly eligibleInputs: ReadonlyArray<GQLSignalInputType>;
@@ -24614,6 +24918,9 @@ export const GQLSignalsFragmentFragmentDoc = gql`
     type
     name
     integration
+    integrationTitle
+    integrationLogoUrl
+    integrationLogoWithBackgroundUrl
     docsUrl
     recommendedThresholds {
       highPrecisionThreshold
@@ -25030,6 +25337,17 @@ export const GQLHashBankByIdDocument = gql`
       hma_name
       enabled_ratio
       org_id
+      exchange {
+        api
+        enabled
+        has_auth
+        error
+        last_fetch_succeeded
+        last_fetch_time
+        up_to_date
+        fetched_items
+        is_fetching
+      }
     }
   }
 `;
@@ -25084,6 +25402,142 @@ export type GQLHashBankByIdQueryResult = Apollo.QueryResult<
   GQLHashBankByIdQuery,
   GQLHashBankByIdQueryVariables
 >;
+export const GQLExchangeApisDocument = gql`
+  query ExchangeApis {
+    exchangeApis {
+      name
+      supports_auth
+      has_auth
+    }
+  }
+`;
+
+/**
+ * __useGQLExchangeApisQuery__
+ *
+ * To run a query within a React component, call `useGQLExchangeApisQuery` and pass it any options that fit your needs.
+ * When your component renders, `useGQLExchangeApisQuery` returns an object from Apollo Client that contains loading, error, and data properties
+ * you can use to render your UI.
+ *
+ * @param baseOptions options that will be passed into the query, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options;
+ *
+ * @example
+ * const { data, loading, error } = useGQLExchangeApisQuery({
+ *   variables: {
+ *   },
+ * });
+ */
+export function useGQLExchangeApisQuery(
+  baseOptions?: Apollo.QueryHookOptions<
+    GQLExchangeApisQuery,
+    GQLExchangeApisQueryVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return Apollo.useQuery<GQLExchangeApisQuery, GQLExchangeApisQueryVariables>(
+    GQLExchangeApisDocument,
+    options,
+  );
+}
+export function useGQLExchangeApisLazyQuery(
+  baseOptions?: Apollo.LazyQueryHookOptions<
+    GQLExchangeApisQuery,
+    GQLExchangeApisQueryVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return Apollo.useLazyQuery<
+    GQLExchangeApisQuery,
+    GQLExchangeApisQueryVariables
+  >(GQLExchangeApisDocument, options);
+}
+export type GQLExchangeApisQueryHookResult = ReturnType<
+  typeof useGQLExchangeApisQuery
+>;
+export type GQLExchangeApisLazyQueryHookResult = ReturnType<
+  typeof useGQLExchangeApisLazyQuery
+>;
+export type GQLExchangeApisQueryResult = Apollo.QueryResult<
+  GQLExchangeApisQuery,
+  GQLExchangeApisQueryVariables
+>;
+export const GQLExchangeApiSchemaDocument = gql`
+  query ExchangeApiSchema($apiName: String!) {
+    exchangeApiSchema(apiName: $apiName) {
+      config_schema {
+        fields {
+          name
+          type
+          required
+          default
+          help
+          choices
+        }
+      }
+      credentials_schema {
+        fields {
+          name
+          type
+          required
+          default
+          help
+          choices
+        }
+      }
+    }
+  }
+`;
+
+/**
+ * __useGQLExchangeApiSchemaQuery__
+ *
+ * To run a query within a React component, call `useGQLExchangeApiSchemaQuery` and pass it any options that fit your needs.
+ * When your component renders, `useGQLExchangeApiSchemaQuery` returns an object from Apollo Client that contains loading, error, and data properties
+ * you can use to render your UI.
+ *
+ * @param baseOptions options that will be passed into the query, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options;
+ *
+ * @example
+ * const { data, loading, error } = useGQLExchangeApiSchemaQuery({
+ *   variables: {
+ *      apiName: // value for 'apiName'
+ *   },
+ * });
+ */
+export function useGQLExchangeApiSchemaQuery(
+  baseOptions: Apollo.QueryHookOptions<
+    GQLExchangeApiSchemaQuery,
+    GQLExchangeApiSchemaQueryVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return Apollo.useQuery<
+    GQLExchangeApiSchemaQuery,
+    GQLExchangeApiSchemaQueryVariables
+  >(GQLExchangeApiSchemaDocument, options);
+}
+export function useGQLExchangeApiSchemaLazyQuery(
+  baseOptions?: Apollo.LazyQueryHookOptions<
+    GQLExchangeApiSchemaQuery,
+    GQLExchangeApiSchemaQueryVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return Apollo.useLazyQuery<
+    GQLExchangeApiSchemaQuery,
+    GQLExchangeApiSchemaQueryVariables
+  >(GQLExchangeApiSchemaDocument, options);
+}
+export type GQLExchangeApiSchemaQueryHookResult = ReturnType<
+  typeof useGQLExchangeApiSchemaQuery
+>;
+export type GQLExchangeApiSchemaLazyQueryHookResult = ReturnType<
+  typeof useGQLExchangeApiSchemaLazyQuery
+>;
+export type GQLExchangeApiSchemaQueryResult = Apollo.QueryResult<
+  GQLExchangeApiSchemaQuery,
+  GQLExchangeApiSchemaQueryVariables
+>;
 export const GQLCreateHashBankDocument = gql`
   mutation CreateHashBank($input: CreateHashBankInput!) {
     createHashBank(input: $input) {
@@ -25096,6 +25550,7 @@ export const GQLCreateHashBankDocument = gql`
           enabled_ratio
           org_id
         }
+        warning
       }
       ... on MatchingBankNameExistsError {
         title
@@ -25266,6 +25721,62 @@ export type GQLDeleteHashBankMutationOptions = Apollo.BaseMutationOptions<
   GQLDeleteHashBankMutation,
   GQLDeleteHashBankMutationVariables
 >;
+export const GQLUpdateExchangeCredentialsDocument = gql`
+  mutation UpdateExchangeCredentials(
+    $apiName: String!
+    $credentialsJson: String!
+  ) {
+    updateExchangeCredentials(
+      apiName: $apiName
+      credentialsJson: $credentialsJson
+    )
+  }
+`;
+export type GQLUpdateExchangeCredentialsMutationFn = Apollo.MutationFunction<
+  GQLUpdateExchangeCredentialsMutation,
+  GQLUpdateExchangeCredentialsMutationVariables
+>;
+
+/**
+ * __useGQLUpdateExchangeCredentialsMutation__
+ *
+ * To run a mutation, you first call `useGQLUpdateExchangeCredentialsMutation` within a React component and pass it any options that fit your needs.
+ * When your component renders, `useGQLUpdateExchangeCredentialsMutation` returns a tuple that includes:
+ * - A mutate function that you can call at any time to execute the mutation
+ * - An object with fields that represent the current status of the mutation's execution
+ *
+ * @param baseOptions options that will be passed into the mutation, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options-2;
+ *
+ * @example
+ * const [gqlUpdateExchangeCredentialsMutation, { data, loading, error }] = useGQLUpdateExchangeCredentialsMutation({
+ *   variables: {
+ *      apiName: // value for 'apiName'
+ *      credentialsJson: // value for 'credentialsJson'
+ *   },
+ * });
+ */
+export function useGQLUpdateExchangeCredentialsMutation(
+  baseOptions?: Apollo.MutationHookOptions<
+    GQLUpdateExchangeCredentialsMutation,
+    GQLUpdateExchangeCredentialsMutationVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return Apollo.useMutation<
+    GQLUpdateExchangeCredentialsMutation,
+    GQLUpdateExchangeCredentialsMutationVariables
+  >(GQLUpdateExchangeCredentialsDocument, options);
+}
+export type GQLUpdateExchangeCredentialsMutationHookResult = ReturnType<
+  typeof useGQLUpdateExchangeCredentialsMutation
+>;
+export type GQLUpdateExchangeCredentialsMutationResult =
+  Apollo.MutationResult<GQLUpdateExchangeCredentialsMutation>;
+export type GQLUpdateExchangeCredentialsMutationOptions =
+  Apollo.BaseMutationOptions<
+    GQLUpdateExchangeCredentialsMutation,
+    GQLUpdateExchangeCredentialsMutationVariables
+  >;
 export const GQLUserAndOrgDocument = gql`
   query UserAndOrg {
     me {
@@ -27364,12 +27875,104 @@ export type GQLSetIntegrationConfigMutationOptions = Apollo.BaseMutationOptions<
   GQLSetIntegrationConfigMutation,
   GQLSetIntegrationConfigMutationVariables
 >;
+export const GQLSetPluginIntegrationConfigDocument = gql`
+  mutation SetPluginIntegrationConfig(
+    $input: SetPluginIntegrationConfigInput!
+  ) {
+    setPluginIntegrationConfig(input: $input) {
+      ... on SetIntegrationConfigSuccessResponse {
+        config {
+          name
+        }
+      }
+      ... on IntegrationConfigTooManyCredentialsError {
+        title
+      }
+      ... on IntegrationNoInputCredentialsError {
+        title
+      }
+      ... on IntegrationEmptyInputCredentialsError {
+        title
+      }
+    }
+  }
+`;
+export type GQLSetPluginIntegrationConfigMutationFn = Apollo.MutationFunction<
+  GQLSetPluginIntegrationConfigMutation,
+  GQLSetPluginIntegrationConfigMutationVariables
+>;
+
+/**
+ * __useGQLSetPluginIntegrationConfigMutation__
+ *
+ * To run a mutation, you first call `useGQLSetPluginIntegrationConfigMutation` within a React component and pass it any options that fit your needs.
+ * When your component renders, `useGQLSetPluginIntegrationConfigMutation` returns a tuple that includes:
+ * - A mutate function that you can call at any time to execute the mutation
+ * - An object with fields that represent the current status of the mutation's execution
+ *
+ * @param baseOptions options that will be passed into the mutation, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options-2;
+ *
+ * @example
+ * const [gqlSetPluginIntegrationConfigMutation, { data, loading, error }] = useGQLSetPluginIntegrationConfigMutation({
+ *   variables: {
+ *      input: // value for 'input'
+ *   },
+ * });
+ */
+export function useGQLSetPluginIntegrationConfigMutation(
+  baseOptions?: Apollo.MutationHookOptions<
+    GQLSetPluginIntegrationConfigMutation,
+    GQLSetPluginIntegrationConfigMutationVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return Apollo.useMutation<
+    GQLSetPluginIntegrationConfigMutation,
+    GQLSetPluginIntegrationConfigMutationVariables
+  >(GQLSetPluginIntegrationConfigDocument, options);
+}
+export type GQLSetPluginIntegrationConfigMutationHookResult = ReturnType<
+  typeof useGQLSetPluginIntegrationConfigMutation
+>;
+export type GQLSetPluginIntegrationConfigMutationResult =
+  Apollo.MutationResult<GQLSetPluginIntegrationConfigMutation>;
+export type GQLSetPluginIntegrationConfigMutationOptions =
+  Apollo.BaseMutationOptions<
+    GQLSetPluginIntegrationConfigMutation,
+    GQLSetPluginIntegrationConfigMutationVariables
+  >;
 export const GQLIntegrationConfigDocument = gql`
-  query IntegrationConfig($name: Integration!) {
+  query IntegrationConfig($name: String!) {
     integrationConfig(name: $name) {
       ... on IntegrationConfigSuccessResult {
         config {
           name
+          title
+          docsUrl
+          requiresConfig
+          logoUrl
+          logoWithBackgroundUrl
+          modelCard {
+            modelName
+            version
+            releaseDate
+            sections {
+              id
+              title
+              subsections {
+                title
+                fields {
+                  label
+                  value
+                }
+              }
+              fields {
+                label
+                value
+              }
+            }
+          }
+          modelCardLearnMoreUrl
           apiCredential {
             ... on GoogleContentSafetyApiIntegrationApiCredential {
               apiKey
@@ -27383,6 +27986,9 @@ export const GQLIntegrationConfigDocument = gql`
                 id
                 label
               }
+            }
+            ... on PluginIntegrationApiCredential {
+              credential
             }
           }
         }
@@ -27505,6 +28111,68 @@ export type GQLMyIntegrationsLazyQueryHookResult = ReturnType<
 export type GQLMyIntegrationsQueryResult = Apollo.QueryResult<
   GQLMyIntegrationsQuery,
   GQLMyIntegrationsQueryVariables
+>;
+export const GQLAvailableIntegrationsDocument = gql`
+  query AvailableIntegrations {
+    availableIntegrations {
+      name
+      title
+      docsUrl
+      requiresConfig
+      logoUrl
+      logoWithBackgroundUrl
+    }
+  }
+`;
+
+/**
+ * __useGQLAvailableIntegrationsQuery__
+ *
+ * To run a query within a React component, call `useGQLAvailableIntegrationsQuery` and pass it any options that fit your needs.
+ * When your component renders, `useGQLAvailableIntegrationsQuery` returns an object from Apollo Client that contains loading, error, and data properties
+ * you can use to render your UI.
+ *
+ * @param baseOptions options that will be passed into the query, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options;
+ *
+ * @example
+ * const { data, loading, error } = useGQLAvailableIntegrationsQuery({
+ *   variables: {
+ *   },
+ * });
+ */
+export function useGQLAvailableIntegrationsQuery(
+  baseOptions?: Apollo.QueryHookOptions<
+    GQLAvailableIntegrationsQuery,
+    GQLAvailableIntegrationsQueryVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return Apollo.useQuery<
+    GQLAvailableIntegrationsQuery,
+    GQLAvailableIntegrationsQueryVariables
+  >(GQLAvailableIntegrationsDocument, options);
+}
+export function useGQLAvailableIntegrationsLazyQuery(
+  baseOptions?: Apollo.LazyQueryHookOptions<
+    GQLAvailableIntegrationsQuery,
+    GQLAvailableIntegrationsQueryVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return Apollo.useLazyQuery<
+    GQLAvailableIntegrationsQuery,
+    GQLAvailableIntegrationsQueryVariables
+  >(GQLAvailableIntegrationsDocument, options);
+}
+export type GQLAvailableIntegrationsQueryHookResult = ReturnType<
+  typeof useGQLAvailableIntegrationsQuery
+>;
+export type GQLAvailableIntegrationsLazyQueryHookResult = ReturnType<
+  typeof useGQLAvailableIntegrationsLazyQuery
+>;
+export type GQLAvailableIntegrationsQueryResult = Apollo.QueryResult<
+  GQLAvailableIntegrationsQuery,
+  GQLAvailableIntegrationsQueryVariables
 >;
 export const GQLInvestigationItemTypesDocument = gql`
   query InvestigationItemTypes {
@@ -33066,6 +33734,61 @@ export type GQLGetNcmecReportQueryResult = Apollo.QueryResult<
   GQLGetNcmecReportQuery,
   GQLGetNcmecReportQueryVariables
 >;
+export const GQLIsWarehouseAvailableDocument = gql`
+  query IsWarehouseAvailable {
+    isWarehouseAvailable
+  }
+`;
+
+/**
+ * __useGQLIsWarehouseAvailableQuery__
+ *
+ * To run a query within a React component, call `useGQLIsWarehouseAvailableQuery` and pass it any options that fit your needs.
+ * When your component renders, `useGQLIsWarehouseAvailableQuery` returns an object from Apollo Client that contains loading, error, and data properties
+ * you can use to render your UI.
+ *
+ * @param baseOptions options that will be passed into the query, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options;
+ *
+ * @example
+ * const { data, loading, error } = useGQLIsWarehouseAvailableQuery({
+ *   variables: {
+ *   },
+ * });
+ */
+export function useGQLIsWarehouseAvailableQuery(
+  baseOptions?: Apollo.QueryHookOptions<
+    GQLIsWarehouseAvailableQuery,
+    GQLIsWarehouseAvailableQueryVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return Apollo.useQuery<
+    GQLIsWarehouseAvailableQuery,
+    GQLIsWarehouseAvailableQueryVariables
+  >(GQLIsWarehouseAvailableDocument, options);
+}
+export function useGQLIsWarehouseAvailableLazyQuery(
+  baseOptions?: Apollo.LazyQueryHookOptions<
+    GQLIsWarehouseAvailableQuery,
+    GQLIsWarehouseAvailableQueryVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return Apollo.useLazyQuery<
+    GQLIsWarehouseAvailableQuery,
+    GQLIsWarehouseAvailableQueryVariables
+  >(GQLIsWarehouseAvailableDocument, options);
+}
+export type GQLIsWarehouseAvailableQueryHookResult = ReturnType<
+  typeof useGQLIsWarehouseAvailableQuery
+>;
+export type GQLIsWarehouseAvailableLazyQueryHookResult = ReturnType<
+  typeof useGQLIsWarehouseAvailableLazyQuery
+>;
+export type GQLIsWarehouseAvailableQueryResult = Apollo.QueryResult<
+  GQLIsWarehouseAvailableQuery,
+  GQLIsWarehouseAvailableQueryVariables
+>;
 export const GQLTotalPendingJobsDocument = gql`
   query TotalPendingJobs {
     getTotalPendingJobsCount
@@ -37158,6 +37881,8 @@ export const namedOperations = {
     ApiAuth: 'ApiAuth',
     HashBanks: 'HashBanks',
     HashBankById: 'HashBankById',
+    ExchangeApis: 'ExchangeApis',
+    ExchangeApiSchema: 'ExchangeApiSchema',
     UserAndOrg: 'UserAndOrg',
     LoggedInUserForRoute: 'LoggedInUserForRoute',
     PermissionGatedRouteLoggedInUser: 'PermissionGatedRouteLoggedInUser',
@@ -37178,6 +37903,7 @@ export const namedOperations = {
     MatchingBankIds: 'MatchingBankIds',
     IntegrationConfig: 'IntegrationConfig',
     MyIntegrations: 'MyIntegrations',
+    AvailableIntegrations: 'AvailableIntegrations',
     InvestigationItemTypes: 'InvestigationItemTypes',
     GetOrgData: 'GetOrgData',
     GetItemsWithId: 'GetItemsWithId',
@@ -37234,6 +37960,7 @@ export const namedOperations = {
     AllNCMECReports: 'AllNCMECReports',
     Permissions: 'Permissions',
     GetNCMECReport: 'GetNCMECReport',
+    IsWarehouseAvailable: 'IsWarehouseAvailable',
     TotalPendingJobs: 'TotalPendingJobs',
     RuleNamesAndIds: 'RuleNamesAndIds',
     DataForOverviewCharts: 'DataForOverviewCharts',
@@ -37282,6 +38009,7 @@ export const namedOperations = {
     CreateHashBank: 'CreateHashBank',
     UpdateHashBank: 'UpdateHashBank',
     DeleteHashBank: 'DeleteHashBank',
+    UpdateExchangeCredentials: 'UpdateExchangeCredentials',
     Login: 'Login',
     DeleteRejectedUser: 'DeleteRejectedUser',
     SignUp: 'SignUp',
@@ -37299,6 +38027,7 @@ export const namedOperations = {
     DeleteTextBank: 'DeleteTextBank',
     BulkActionExecution: 'BulkActionExecution',
     SetIntegrationConfig: 'SetIntegrationConfig',
+    SetPluginIntegrationConfig: 'SetPluginIntegrationConfig',
     DeleteItemType: 'DeleteItemType',
     CreateContentType: 'CreateContentType',
     UpdateContentType: 'UpdateContentType',

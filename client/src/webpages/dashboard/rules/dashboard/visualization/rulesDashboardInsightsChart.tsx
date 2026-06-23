@@ -7,7 +7,7 @@ import {
   SelectValue,
 } from '@/coop-ui/Select';
 import { TapFilled } from '@/icons';
-import { ReactComponent as Download } from '@/icons/lni/Web and Technology/download.svg';
+import Download from '@/icons/lni/Web and Technology/download.svg?react';
 import { truncateAndFormatLargeNumber } from '@/utils/number';
 import type { TimeDivisionOptions } from '@/webpages/dashboard/overview/Overview';
 import flatten from 'lodash/flatten';
@@ -18,7 +18,7 @@ import sortBy from 'lodash/sortBy';
 import sumBy from 'lodash/sumBy';
 import union from 'lodash/union';
 import without from 'lodash/without';
-import moment from 'moment';
+import { format } from 'date-fns';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CSVLink } from 'react-csv';
 import {
@@ -197,9 +197,7 @@ export default function RuleDashboardInsightsChart(props: {
 
   const formattedData = countsByDay?.map((it) => {
     const obj: { [key: string]: any } = {
-      ds: moment(new Date(parseInt(it.time)))
-        .local()
-        .format(`YYYY-MM-DD${timeDivision === 'HOUR' ? ' HH:mm' : ''}`),
+      ds: format(new Date(parseInt(it.time)), timeDivision === 'HOUR' ? 'yyyy-MM-dd HH:mm' : 'yyyy-MM-dd'),
     };
     obj[getLineNameFromCount(it)] = it.count;
     return obj;
@@ -421,8 +419,8 @@ export default function RuleDashboardInsightsChart(props: {
 
   const emptyChart = (
     <div className="flex flex-col items-center justify-center gap-3 p-6 rounded bg-slate-100">
-      <div className="text-xl">
-        We didn't find any results for this query. Try another one!
+      <div className="text-sm text-slate-400">
+        No data available for the selected time period.
       </div>
       <CoopButton
         title="Reset Filters"
@@ -430,6 +428,10 @@ export default function RuleDashboardInsightsChart(props: {
         size="small"
       />
     </div>
+  );
+
+  const hasNonZeroData = finalChartData.some((row) =>
+    uniqueLines.some((line) => (row[line] ?? 0) > 0),
   );
 
   const lineChart = uniqueLines.map((name, index) => {
@@ -536,7 +538,7 @@ export default function RuleDashboardInsightsChart(props: {
         </div>
       </div>
       <div className="z-10 flex flex-col w-full h-full min-h-[400px] pb-4">
-        {!loading && finalChartData.length === 0 ? (
+        {!loading && (finalChartData.length === 0 || uniqueLines.length === 0 || !hasNonZeroData) ? (
           emptyChart
         ) : (
           <ResponsiveContainer width="100%" height={400}>
@@ -554,6 +556,7 @@ export default function RuleDashboardInsightsChart(props: {
                   tick={renderCustomYAxisTick}
                   tickLine={false}
                   stroke="#d4d4d8"
+                  domain={[0, (dataMax: number) => dataMax || 1]}
                   label={{
                     value: `Total Actions`,
                     style: { textAnchor: 'middle' },

@@ -5,7 +5,7 @@ import {
   useGQLUserStrikeThresholdsQuery,
 } from '@/graphql/generated';
 import { gql } from '@apollo/client';
-import moment from 'moment';
+import { format } from 'date-fns';
 import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
@@ -174,7 +174,6 @@ function RecentUserStrikeActionsTable() {
   );
   const recentUserStrikeActions = data?.recentUserStrikeActions;
 
-  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const tableData = useMemo(
     () => {
       return recentUserStrikeActions
@@ -196,11 +195,11 @@ function RecentUserStrikeActionsTable() {
             action: actionsById
               ? actionsById[values.actionId] || 'Unknown'
               : 'Unknown',
-            date: moment(values.time).zone(timezone).format('MM/DD/YY hh:mm'),
+            date: format(new Date(values.time), 'MM/dd/yy hh:mm'),
           };
         });
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
     [recentUserStrikeActions, actionsById],
   );
 

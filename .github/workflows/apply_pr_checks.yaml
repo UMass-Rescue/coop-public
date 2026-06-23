@@ -32,11 +32,8 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version-file: '.nvmrc'
-          check-latest: true
           cache: 'npm'
-      - env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm ci
+      - run: npm ci
       - name: Generate graphql
         run: |
           npm run generate
@@ -48,33 +45,6 @@ jobs:
             exit 1
           fi
 
-  run_betterer:
-    timeout-minutes: 4
-    needs: [check_for_client_changes, check_for_server_changes]
-    if: needs.check_for_server_changes.outputs.result == 'true' || needs.check_for_client_changes.outputs.result == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v6
-        with:
-          node-version-file: '.nvmrc'
-          check-latest: true
-          cache: 'npm'
-
-      - name: Install dependencies in root and client directory
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          npm ci
-          cd client
-          cp ../.npmrc .
-          npm ci
-
-      - name: Run Betterer tests
-        run: npm run betterer
-        env:
-          NODE_OPTIONS: '--max-old-space-size=5250'
-
   check_migration_order:
     runs-on: ubuntu-latest
     steps:
@@ -83,12 +53,12 @@ jobs:
           # this is needed to fetch the main branch
           ref: ${{ github.base_ref || 'main' }}
           fetch-depth: 1
-          sparse-checkout: '.devops/migrator/src/scripts'
+          sparse-checkout: 'db/src/scripts'
       - uses: actions/checkout@v4
         with:
           # this is needed to fetch the main branch
           fetch-depth: 1
-          sparse-checkout: '.devops/migrator/src/scripts'
+          sparse-checkout: 'db/src/scripts'
 
       - name: Check changed migration files
         id: check-changed-migration-files
@@ -104,7 +74,7 @@ jobs:
           # the datestamp.
           #
           # NB: The filename will look something like:
-          # 2022.12.22T03.39.16.test_snowflake_migration.(cjs|sql|cql)
+          # 2022.12.22T03.39.16.example_migration.(cjs|sql|cql)
           datestamp() {
             echo $(basename $1 | rev | cut -d . -f3- | rev)
           }
@@ -122,7 +92,7 @@ jobs:
             fi
           }
 
-          SCRIPTS_DIR=".devops/migrator/src/scripts/"
+          SCRIPTS_DIR="db/src/scripts/"
 
           # Checkout main so that we're correctly identifying the existing migrations
           # in the loop below.
@@ -160,9 +130,6 @@ jobs:
     if: needs.check_for_server_changes.outputs.result == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-      SNOWFLAKE_DB_NAME: CI_DB_${{ github.run_id }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -171,7 +138,7 @@ jobs:
         run: docker compose run --quiet-pull lint
 
       - name: Build server
-        run: DOCKER_BUILDKIT=1 docker build . --target build_backend --build-arg NPM_TOKEN=$NPM_TOKEN
+        run: DOCKER_BUILDKIT=1 docker build . --target build_backend
 
       - name: Migrate CI DBs and Test
         run: |
@@ -204,14 +171,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Lint client
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: docker compose run --quiet-pull lint-client
 
       - name: Build client
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         # Without DOCKER_BUILDKIT we'll attempt to build the backend as well
-        run: DOCKER_BUILDKIT=1 docker build client --build-arg NPM_TOKEN=$NPM_TOKEN
+        run: DOCKER_BUILDKIT=1 docker build client
 
 

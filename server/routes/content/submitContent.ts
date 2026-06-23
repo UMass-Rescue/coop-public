@@ -131,7 +131,7 @@ Dependencies): RequestHandlerWithBodies<
 
     const shouldReturnImmediately =
       'contentId' in req.body && !Boolean(req.body.sync);
-    const skipSnowflakeEventualWriteBatch =
+    const skipWarehouseEventualWriteBatch =
       'contentId' in req.body && Boolean(req.body.sync);
 
     const { body } = req;
@@ -182,7 +182,7 @@ Dependencies): RequestHandlerWithBodies<
             .map((it) => (it instanceof Error ? it.message : ''))
             .join('\n')}`,
         },
-        skipSnowflakeEventualWriteBatch,
+        skipWarehouseEventualWriteBatch,
       );
 
       return next(itemSubmissionOrError.error);
@@ -230,7 +230,7 @@ Dependencies): RequestHandlerWithBodies<
       const results = await RuleEngine.runEnabledRules(
         itemSubmissionOrError.itemSubmission,
         requestId,
-        skipSnowflakeEventualWriteBatch,
+        skipWarehouseEventualWriteBatch,
       );
 
       await ContentApiLogger.logContentApiRequest(
@@ -240,7 +240,7 @@ Dependencies): RequestHandlerWithBodies<
           itemSubmission: itemSubmissionOrError.itemSubmission,
           failureReason: undefined,
         },
-        skipSnowflakeEventualWriteBatch,
+        skipWarehouseEventualWriteBatch,
       );
 
       // Load the requested derived fields
@@ -327,7 +327,7 @@ Dependencies): RequestHandlerWithBodies<
             safeGet(e, ['message']),
           )}`,
         },
-        skipSnowflakeEventualWriteBatch,
+        skipWarehouseEventualWriteBatch,
       );
 
       return next(

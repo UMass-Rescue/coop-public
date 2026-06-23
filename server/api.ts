@@ -19,12 +19,12 @@ import {
   ApolloServerPluginLandingPageGraphQLPlayground,
 } from 'apollo-server-core';
 import { ApolloServer } from 'apollo-server-express';
-import bodyParser from 'body-parser';
 import connectPgSimple from 'connect-pg-simple';
 import cors from 'cors';
 import express, { type ErrorRequestHandler } from 'express';
 import session from 'express-session';
 import { buildContext, GraphQLLocalStrategy } from 'graphql-passport';
+import depthLimit from 'graphql-depth-limit';
 import helmet from 'helmet';
 import passport from 'passport';
 import { MultiSamlStrategy } from '@node-saml/passport-saml';
@@ -38,6 +38,7 @@ import resolvers from './graphql/resolvers.js';
 import typeDefs from './graphql/schema.js';
 import { authSchemaWrapper } from './graphql/utils/authorization.js';
 import { type Dependencies } from './iocContainer/index.js';
+import { safeGetEnvInt } from './iocContainer/utils.js';
 import controllers from './routes/index.js';
 import { jsonStringify } from './utils/encoding.js';
 import {
@@ -98,7 +99,25 @@ export default async function makeApiServer(deps: Dependencies) {
 
   app.use(cors());
 
-  app.use(helmet(env === 'production' ? {} : { contentSecurityPolicy: false }));
+  app.use(
+    helmet(
+      env === 'production'
+        ? {}
+        : {
+            contentSecurityPolicy: {
+              directives: {
+                defaultSrc: ["'self'"],
+                scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+                styleSrc: ["'self'", "'unsafe-inline'"],
+                imgSrc: ["'self'", 'data:', 'blob:', 'https:', 'http:'],
+                connectSrc: ["'self'", 'ws:', 'wss:', 'https:', 'http:'],
+                fontSrc: ["'self'", 'data:', 'https:'],
+                frameSrc: ["'self'"],
+              },
+            },
+          },
+    ),
+  );
   app.use(express.json({ limit: '50mb' }));
 
   app.get('/ready', async (_req, res) => {
@@ -128,6 +147,8 @@ export default async function makeApiServer(deps: Dependencies) {
       store: new sessionStore({ conString: connectionString }),
       cookie: {
         secure: process.env.NODE_ENV === 'production',
+        httpOnly: true,
+        sameSite: 'lax',
         // 30 Days in milliseconds
         maxAge: 30 * 24 * 60 * 60 * 1000,
       },
@@ -238,7 +259,7 @@ export default async function makeApiServer(deps: Dependencies) {
 
   app.post(
     `/saml/login/:orgId/callback`,
-    bodyParser.urlencoded({ extended: false }),
+    express.urlencoded({ extended: false }),
     passport.authenticate('saml', {
       failureRedirect: '/',
       failureFlash: true,
@@ -354,6 +375,7 @@ export default async function makeApiServer(deps: Dependencies) {
           : ApolloServerPluginLandingPageGraphQLPlayground()),
       },
     ],
+    validationRules: [depthLimit(safeGetEnvInt('GRAPHQL_MAX_DEPTH', 10))],
     introspection: process.env.NODE_ENV !== 'production',
     formatError(e) {
       // `e` can be an ApolloError instance, but will only be one if such an
@@ -501,6 +523,7 @@ function makeGqlServices(deps: Dependencies) {
   return {
     ...safePick(deps, [
       'ApiKeyService',
+      'DataWarehouse',
       'DerivedFieldsService',
       'getItemTypeEventuallyConsistent',
       'getEnabledRulesForItemTypeEventuallyConsistent',
@@ -516,6 +539,7 @@ function makeGqlServices(deps: Dependencies) {
       'Sequelize',
       'SignalsService',
       'SigningKeyPairService',
+      'Tracer',
       'UserManagementService',
       'UserStatisticsService',
       'UserHistoryQueries',

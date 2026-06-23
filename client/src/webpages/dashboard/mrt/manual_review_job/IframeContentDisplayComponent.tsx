@@ -15,8 +15,8 @@ export default function IframeContentDisplayComponent(props: {
   const { contentUrl } = props;
 
   const contentProxyUrl =
-    process.env.REACT_APP_CONTENT_PROXY_URL ??
-    (process.env.NODE_ENV === 'production'
+    import.meta.env.VITE_CONTENT_PROXY_URL ??
+    (import.meta.env.MODE === 'production'
       ? 'https://content.getcoop.com'
       : 'http://localhost:4000');
 
@@ -165,7 +165,7 @@ export default function IframeContentDisplayComponent(props: {
             setIsIframeLoading(false);
             setIframeError(null);
           }}
-          onError={(e) => {
+          onError={(_e) => {
             setIsIframeLoading(false);
             setIframeError('Failed to load content');
           }}

@@ -16,7 +16,7 @@ import sortBy from 'lodash/sortBy';
 import sum from 'lodash/sum';
 import union from 'lodash/union';
 import without from 'lodash/without';
-import moment from 'moment';
+import { format } from 'date-fns';
 import {
   useCallback,
   useEffect,
@@ -180,7 +180,9 @@ export default function OverviewChart(props: {
 
   const emptyChart = (
     <div className="flex flex-col items-center justify-center gap-3 p-6 rounded bg-slate-100">
-      <div className="text-xl">We didn't find any results for this query</div>
+      <div className="text-sm text-slate-400">
+        No data available for the selected time period.
+      </div>
     </div>
   );
 
@@ -323,9 +325,7 @@ export default function OverviewChart(props: {
 
   const formattedData = countsPerMetricPerTimeUnit?.map((it) => {
     const obj: { [key: string]: string | number } = {
-      ds: moment(new Date(parseInt(it.time)))
-        .local()
-        .format(`YYYY-MM-DD${timeDivision === 'HOUR' ? ' HH:mm' : ''}`),
+      ds: format(new Date(parseInt(it.time)), timeDivision === 'HOUR' ? 'yyyy-MM-dd HH:mm' : 'yyyy-MM-dd'),
     };
     obj[getLineNameFromCount(it)] = it.count;
     return obj;
@@ -379,6 +379,10 @@ export default function OverviewChart(props: {
     return obj;
   });
 
+  const hasNonZeroData = finalChartData.some((row) =>
+    uniqueLines.some((line) => (row[line] ?? 0) > 0),
+  );
+
   const lineChart = uniqueLines.map((name, index) => {
     return (
       <Line
@@ -415,7 +419,21 @@ export default function OverviewChart(props: {
   ));
 
   if (error || decisionsError || actionStatsError) {
-    throw error ?? decisionsError ?? actionStatsError!;
+    return (
+      <div className="flex flex-col w-full p-6 bg-white border border-solid rounded-lg border-slate-200">
+        <div className="flex pb-6">
+          <div className="flex items-start gap-2">
+            <Icon className={`flex w-6 h-6 ${iconColor}`} />
+            <div className="pb-2 text-lg font-bold">{title}</div>
+          </div>
+        </div>
+        <div className="flex flex-col items-center justify-center gap-3 p-6 rounded bg-slate-100">
+          <div className="text-sm text-slate-400">
+            Analytics data is temporarily unavailable.
+          </div>
+        </div>
+      </div>
+    );
   }
 
   const loading = decisionsLoading || actionStatsLoading;
@@ -442,7 +460,7 @@ export default function OverviewChart(props: {
         </div>
       </div>
       <div className="z-10 flex flex-col w-full h-full min-h-[400px] pb-4">
-        {!loading && finalChartData.length === 0 ? (
+        {!loading && (finalChartData.length === 0 || uniqueLines.length === 0 || !hasNonZeroData) ? (
           emptyChart
         ) : (
           <ResponsiveContainer width="100%" height={400}>
@@ -460,6 +478,7 @@ export default function OverviewChart(props: {
                   tick={renderCustomYAxisTick}
                   tickLine={false}
                   stroke="#d4d4d8"
+                  domain={[0, (dataMax: number) => dataMax || 1]}
                   label={{
                     value: `Total ${titleCaseEnumString(metric)}`,
                     style: { textAnchor: 'middle' },

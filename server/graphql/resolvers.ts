@@ -40,7 +40,7 @@ import { resolvers as textBankResolvers } from './modules/textBank.js';
 import { resolvers as userResolvers } from './modules/user.js';
 import { gqlErrorResult, gqlSuccessResult } from './utils/gqlResult.js';
 
-// eslint-disable-next-line @typescript-eslint/ban-types
+// eslint-disable-next-line @typescript-eslint/no-restricted-types
 export type Context = PassportContext<User, {}> & {
   dataSources: DataSources;
   services: GQLServices;
@@ -98,8 +98,29 @@ const Query: GQLQueryResolvers = {
       return null;
     }
 
-    // TODO: this response type actually isn't right; remove cast and fix errors.
-    return context.dataSources.ruleAPI.getAllRuleInsights(user.orgId) as any;
+    try {
+      // TODO: this response type actually isn't right; remove cast and fix errors.
+      return (await context.dataSources.ruleAPI.getAllRuleInsights(
+        user.orgId,
+      )) as any;
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('allRuleInsights: warehouse query failed:', (e as Error).message);
+      return null;
+    }
+  },
+  async isWarehouseAvailable(_, __, context) {
+    try {
+      await context.services.DataWarehouse.query(
+        'SELECT 1',
+        context.services.Tracer,
+      );
+      return true;
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('isWarehouseAvailable: warehouse health check failed:', (e as Error).message);
+      return false;
+    }
   },
 };
 

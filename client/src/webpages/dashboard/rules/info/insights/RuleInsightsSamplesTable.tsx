@@ -29,7 +29,6 @@ import Table from '../../../components/table/Table';
 import {
   GQLField,
   GQLFieldType,
-  GQLIntegration,
   GQLRuleStatus,
   useGQLRuleInsightsCurrentVersionSamplesQuery,
   useGQLRuleInsightsPriorVersionSamplesLazyQuery,
@@ -62,7 +61,7 @@ export enum RuleEnvironment {
 export type SignalWithResult = {
   subcategory?: string | null;
   signalName: string;
-  integration?: GQLIntegration | null | undefined;
+  integration?: string | null | undefined;
   score?: string;
 };
 
@@ -701,13 +700,14 @@ export default function RuleInsightsSamplesTable(props: { ruleId: string }) {
       ) : tableData?.length === 0 ? (
         noSamples
       ) : (
-        <div className="flex">
-          <div className="rounded-[5px] border-solid border-0 border-b border-[#f0f0f0] max-h-[1500px] overflow-scroll scrollbar-hide">
+        <div className="flex w-full">
+          <div className="w-full rounded-[5px] border-solid border-0 border-b border-[#f0f0f0] max-h-[1500px] overflow-scroll scrollbar-hide">
             <Table
               // @ts-ignore
               columns={columns}
               data={tableData!}
               onSelectRow={onSelectRow}
+              containerClassName="w-full"
             />
           </div>
           {detailViewData.visible && detailViewData.item && (

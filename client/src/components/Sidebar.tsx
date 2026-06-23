@@ -1,8 +1,8 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/coop-ui/Tooltip';
 import { GQLUserPermission } from '@/graphql/generated';
 import { CogFilled, ExitFilled, UserAlt3Filled } from '@/icons';
-import { ReactComponent as AngleDoubleLeft } from '@/icons/lni/Direction/angle-double-left.svg';
-import { ReactComponent as AngleDoubleRight } from '@/icons/lni/Direction/angle-double-right.svg';
+import AngleDoubleLeft from '@/icons/lni/Direction/angle-double-left.svg?react';
+import AngleDoubleRight from '@/icons/lni/Direction/angle-double-right.svg?react';
 import { cn } from '@/lib/utils';
 import { makeEnumLike } from '@roostorg/types';
 import React, {
@@ -18,6 +18,7 @@ import DashboardMenuButton from '@/webpages/dashboard/components/DashboardMenuBu
 
 import LogoAndWordmarkPurple from '../images/LogoAndWordmarkPurple.png';
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- value consumed only via `typeof` for MenuItemName
 const MenuItemNames = makeEnumLike([
   'Overview',
   'Automated Enforcement',
@@ -270,7 +271,7 @@ export default function Sidebar(props: SidebarProps) {
     <div
       className={`relative flex flex-col justify-between bg-white ${
         collapsed ? '' : 'min-w-[250px]'
-      } text-[14px]`}
+      } text-[14px] leading-normal`}
     >
       <div className="flex flex-col p-[14px]">
         <div className="flex items-center justify-between mb-[24px]">

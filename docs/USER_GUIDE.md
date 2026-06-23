@@ -215,7 +215,9 @@ You can use the Investigation tool (either plug in the unique ID of the Item or 
 * The details and full context of any previous actions taken on the Item, and the user who created it.  
 * Other Items that are closely related to the main Item you're investigating. For example, if you're investigating a single comment within a larger comment thread, we'll show you preceding and subsequent comments in the thread.
 
-You can also manually take action on the Item as you're investigating it. This is useful when you want to take action but aren't reviewing the Item within the context of a Review Queue.
+**Taking action from Investigation:** You can also manually take action on the Item as you're investigating it. Use the **"Take action on this item"** form (above the results): select an action, add a policy if required, then click **Submit Actions**. You can do this without being in a Review Queue—for example, to unban a user after a ban was applied earlier.
+
+**Reversing an action (e.g. unbanning):** Coop has no built-in undo. To be able to do this, create a separate custom action in Settings that calls your platform’s reverse endpoint (e.g. unban) if it exists. Run that action on the item from Investigation tool or by navigating from Recent Decisions. Once you take action on the item the callback would send the request to your platform to perform any required actions.
 
 ## Automated Enforcement
 
@@ -281,7 +283,7 @@ Coop logs all actions taken in a Recent Decisions Log that includes basic inform
 
 ## NCMEC Review and Reporting
 
-Coop is integrated with the [CyberTip Reporting API](https://report.cybertip.org/ispws/documentation) from the National Center for Missing and Exploited Children. Head to [NCMEC.md](/docs/NCMEC.md) for more information.
+Coop is integrated with the [CyberTip Reporting API](https://report.cybertip.org/ispws/documentation) from the National Center for Missing and Exploited Children. Head to [NCMEC Reporting](NCMEC.md) for more information.
 
 ![Coop's NCMEC settings page where you populate your organization's ESP username, password, name of org, and legal URL.](./images/coop-ncmec-settings.png) 
 

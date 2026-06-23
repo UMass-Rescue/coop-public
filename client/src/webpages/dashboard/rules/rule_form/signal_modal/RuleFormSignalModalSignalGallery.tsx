@@ -23,12 +23,14 @@ export default function RuleFormSignalModalSignalGallery(props: {
   const filteredSignals = useMemo(
     () =>
       allSignals
-        // First filter out disabled signals
+        // Show built-in Coop signals (no integration), known integrations (in INTEGRATION_CONFIGS), or plugin integrations (any other string)
         .filter((signal) =>
+          signal.integration === null ||
           INTEGRATION_CONFIGS.some(
-            (config) =>
-              signal.integration === config.name || signal.integration === null,
-          ),
+            (config) => signal.integration === config.name,
+          ) ||
+          (typeof signal.integration === 'string' &&
+            signal.integration.length > 0),
         )
         // Then filter out the text similarity score signals
         .filter((it) => it.type !== 'TEXT_SIMILARITY_SCORE')
@@ -40,8 +42,7 @@ export default function RuleFormSignalModalSignalGallery(props: {
         )
         // Filter out 3rd party signals for demo orgs
         .filter((signal) => !(isDemoOrg && signal.integration)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isDemoOrg, searchTerm],
+    [allSignals, isDemoOrg, searchTerm],
   );
 
   return (
@@ -85,22 +86,32 @@ export default function RuleFormSignalModalSignalGallery(props: {
                     `${b.signal.integration}_${b.signal.name}`,
                   ),
             )
-            .map(({ signal, effectiveDisabledInfo }) => (
-              <div key={signal.name}>
+            .map(({ signal, effectiveDisabledInfo }) => {
+              const staticConfig = INTEGRATION_CONFIGS.find(
+                (it) => it.name === signal.integration,
+              );
+              // Signals use the logo-with-background variant.
+              const rawPath =
+                signal.integrationLogoWithBackgroundUrl ??
+                staticConfig?.logoWithBackground ??
+                undefined;
+              const imagePath =
+                typeof rawPath === 'string' && rawPath.startsWith('/')
+                  ? `${window.location.origin}${rawPath}`
+                  : rawPath;
+              return (
+                <div key={signal.name}>
                   <RuleFormSignalModalMenuItem
                     key={signal.id}
                     signal={signal}
-                    imagePath={
-                      INTEGRATION_CONFIGS.find(
-                        (it) => it.name === signal.integration,
-                      )?.logoWithBackground
-                    }
+                    imagePath={imagePath}
                     onClick={() => onSelectSignal(signal)}
                     infoButtonTapped={() => onSignalInfoSelected(signal)}
                     disabledInfo={effectiveDisabledInfo}
                   />
-              </div>
-            ))}
+                </div>
+              );
+            })}
         </div>
       ) : (
         <RuleFormSignalModalNoSearchResults />

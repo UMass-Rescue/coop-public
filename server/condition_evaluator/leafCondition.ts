@@ -562,11 +562,14 @@ async function getSignalRuntimeArgs(
   conditionInput: ReadonlyDeep<ConditionInput>,
 ) {
   if (conditionSignalInfo.type === 'AGGREGATION') {
-    return evaluateAggregationRuntimeArgsForItem(
-      evaluationContext,
-      itemSubmission,
-      conditionSignalInfo.args.aggregationClause,
-    );
+    const args = conditionSignalInfo.args;
+    if (args != null) {
+      return evaluateAggregationRuntimeArgsForItem(
+        evaluationContext,
+        itemSubmission,
+        args.aggregationClause,
+      );
+    }
   }
 
   if (conditionSignalInfo.type === 'SENTINEL_RARE_CLASS_AFFINITY') {

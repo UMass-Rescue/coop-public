@@ -36,11 +36,10 @@ import {
 import {
   isSignalId,
   signalIsExternal,
-  type ExternalSignalType,
   type SignalId,
 } from '../../services/signalsService/index.js';
 import { type ConditionSetWithResultAsLogged } from '../../services/analyticsLoggers/index.js';
-import { type SnowflakePublicSchema } from '../../snowflake/types.js';
+import { type DataWarehousePublicSchema } from '../../storage/dataWarehouse/warehouseSchema.js';
 import { toCorrelationId } from '../../utils/correlationIds.js';
 import {
   jsonParse,
@@ -269,9 +268,11 @@ function parseAggregationClauseInput(
  * GraphQL Object for a Rule
  */
 class RuleAPI extends DataSource {
+  private readonly warehouse: Kysely<DataWarehousePublicSchema>;
+
   constructor(
     private readonly knex: Dependencies['Knex'],
-    private readonly snowflake: Kysely<SnowflakePublicSchema>,
+    dialect: Dependencies['DataWarehouseDialect'],
     public readonly ruleInsights: Dependencies['RuleActionInsights'],
     private readonly actionStats: Dependencies['ActionStatisticsService'],
     private readonly models: Dependencies['Sequelize'],
@@ -279,6 +280,7 @@ class RuleAPI extends DataSource {
     private readonly signalsService: Dependencies['SignalsService'],
   ) {
     super();
+    this.warehouse = dialect.getKyselyInstance() as Kysely<DataWarehousePublicSchema>;
   }
 
   async getGraphQLRuleFromId(id: string, orgId: string) {
@@ -572,13 +574,7 @@ class RuleAPI extends DataSource {
   }
 
   async getAllRuleInsights(orgId: string) {
-    const [
-      actionedSubmissionsByDay,
-      actionedSubmissionsByPolicyByDay,
-      actionedSubmissionsByTagByDay,
-      actionedSubmissionsByActionByDay,
-      totalSubmissionsByDay,
-    ] = await Promise.all([
+    const results = await Promise.allSettled([
       this.actionStats.getActionedSubmissionCountsByDay(orgId),
       this.actionStats.getActionedSubmissionCountsByPolicyByDay(orgId),
       this.actionStats.getActionedSubmissionCountsByTagByDay(orgId),
@@ -586,12 +582,17 @@ class RuleAPI extends DataSource {
       this.ruleInsights.getContentSubmissionCountsByDay(orgId),
     ]);
 
+    const valueOrEmpty = <T,>(r: PromiseSettledResult<readonly T[]>): readonly T[] =>
+      r.status === 'fulfilled' ? r.value : [];
+
     return {
-      actionedSubmissionsByDay,
-      actionedSubmissionsByPolicyByDay,
-      actionedSubmissionsByTagByDay,
-      actionedSubmissionsByActionByDay,
-      totalSubmissionsByDay,
+      actionedSubmissionsByDay: valueOrEmpty(results[0]),
+      actionedSubmissionsByPolicyByDay: valueOrEmpty(results[1]),
+      actionedSubmissionsByTagByDay: valueOrEmpty(results[2]),
+      actionedSubmissionsByActionByDay: valueOrEmpty(results[3]),
+      totalSubmissionsByDay: valueOrEmpty(
+        results[4] as PromiseSettledResult<readonly { date: string; count: number }[]>,
+      ),
     };
   }
 
@@ -672,7 +673,7 @@ class RuleAPI extends DataSource {
     // // to be aware of all our WHERE clause filters and their implications for
     // // the other columns.
     // // prettier-ignore
-    // this.getItemSubmissionsFromSnowflake({
+    // this.getItemSubmissionsFromWarehouse({
     //   orgId: user.orgId,
     //   randomSample: true,
     //   numRows: input.sampleDesiredSize,
@@ -717,7 +718,7 @@ class RuleAPI extends DataSource {
     const allResultsQuery = this.knex('RULE_EXECUTIONS')
       .select({
         // This select is aliasing each column to the corresponding object key,
-        // so we have to do fewer renames from snowflakes ALL_CAPS_SNAKE_CASE
+        // so we have to do fewer renames from the warehouse ALL_CAPS_SNAKE_CASE
         // when we return the final result.
         date: 'DS',
         ts: 'TS',
@@ -770,7 +771,7 @@ class RuleAPI extends DataSource {
         : takeLast(filteredResultsQuery, [desiredSort], count);
 
     const results = (
-      await sql`${sql.raw(finalQuery.toString())}`.execute(this.snowflake)
+      await sql`${sql.raw(finalQuery.toString())}`.execute(this.warehouse)
     ).rows;
 
     return results.map((it: any) => ({
@@ -814,7 +815,7 @@ class RuleAPI extends DataSource {
     // }
 
     // const id = uid();
-    // const submissions = await this.getItemSubmissionsFromSnowflake({
+    // const submissions = await this.getItemSubmissionsFromWarehouse({
     //   orgId: user.orgId,
     //   itemTypeIds: ruleContentTypes.map((ct) => ct.id),
     //   randomSample: false,
@@ -881,19 +882,16 @@ class RuleAPI extends DataSource {
           processCondition(subCondition);
         }
       } else if ('signal' in condition && condition.signal) {
-        // It's a leaf condition with a signal
+        // It's a leaf condition with a signal (type is String to support plugin signals)
         const { type, id } = condition.signal;
-        // GQLSignalType values map to ExternalSignalType (conditions can only
-        // contain user-visible external signals). Cast is safe since this comes
-        // from validated GraphQL input.
         let signalId: SignalId;
         if (type === 'CUSTOM') {
           // CUSTOM signals require an id field. The id comes from validated GraphQL
           // input where it's a required Scalars['ID'], so we can safely cast it.
           signalId = { type: 'CUSTOM' as const, id: id as NonEmptyString };
         } else {
-          // Built-in signals only need the type
-          signalId = { type: type as Exclude<ExternalSignalType, 'CUSTOM'> };
+          // Built-in and plugin signals: type is the signal type string
+          signalId = { type };
         }
         signalIds.push(signalId);
       }
@@ -914,7 +912,7 @@ class RuleAPI extends DataSource {
 export default inject(
   [
     'Knex',
-    'KyselySnowflake',
+    'DataWarehouseDialect',
     'RuleActionInsights',
     'ActionStatisticsService',
     'Sequelize',
