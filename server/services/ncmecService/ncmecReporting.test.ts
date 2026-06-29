@@ -350,6 +350,9 @@ describe('NCMEC reporting', () => {
     });
   });
 
+  // toOriginalFileHashes tests moved to ./toOriginalFileHashes.test.ts
+  // (this file was over the 500-line max-lines limit after expansion).
+
   describe('summarizeCyberTipFailure', () => {
     const previousDebug = process.env.NCMEC_DEBUG;
     const previousNodeEnv = process.env.NODE_ENV;

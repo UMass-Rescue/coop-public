@@ -133,10 +133,18 @@ type FileDetails = {
     fileRelevance?: 'Reported' | 'Supplemental Reported';
     fileAnnotations?: FileAnnotations;
     industryClassification?: NCMECIndustryClassificationType;
+    originalFileHash?: OriginalFileHash[];
     ipCaptureEvent?: IPNCMECEvent[];
     deviceId?: DeviceId[];
     details?: Detail[];
     additionalInfo?: string[];
+  };
+};
+
+type OriginalFileHash = {
+  _text: string;
+  _attributes: {
+    hashType: string;
   };
 };
 
@@ -174,6 +182,12 @@ type Media = {
    * `Upload` event. */
   ipAddress?: string;
   deviceId?: DeviceNCMECEvent[];
+  /** Hashes computed for this URL (typically by HMA at item submission
+   * time). Keyed by hash algorithm name (e.g. `md5`, `pdq`); the value is
+   * the hex-encoded hash. Forwarded to NCMEC as `originalFileHash`
+   * entries with the algorithm name uppercased into the `hashType`
+   * attribute. */
+  hashes?: Record<string, string>;
 };
 
 type NCMECUserParams = {
@@ -547,6 +561,42 @@ export function mergeFieldRoleIpIntoEvents(
   return events.length > 0 ? events : undefined;
 }
 
+/** Build the NCMEC `originalFileHash[]` shape from both hash sources Coop
+ * has: HMA-computed hashes stored on the item data (keyed by algorithm),
+ * and any single `{ hash, hashType }` returned by the additional-info
+ * webhook for this media. Trims blanks, uppercases the algorithm name into
+ * the `hashType` attribute, drops empty entries, and dedupes on
+ * (`hashType`, hash value) so a webhook that returns the same algorithm as
+ * HMA doesn't produce duplicate entries. Returns undefined when no usable
+ * hashes survive filtering; callers should branch on that to omit the key
+ * entirely rather than serialise an empty array. */
+export function toOriginalFileHashes(opts: {
+  hmaHashes?: Record<string, string>;
+  webhookFileDetails?: { hash: string; hashType: string };
+}): OriginalFileHash[] | undefined {
+  const result: OriginalFileHash[] = [];
+  const seen = new Set<string>();
+  const push = (algorithm: string, hash: string) => {
+    const trimmedHash = typeof hash === 'string' ? hash.trim() : '';
+    const trimmedAlgorithm = algorithm.trim();
+    if (trimmedHash === '' || trimmedAlgorithm === '') return;
+    const hashType = trimmedAlgorithm.toUpperCase();
+    const key = `${hashType} ${trimmedHash}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    result.push({ _text: trimmedHash, _attributes: { hashType } });
+  };
+  if (opts.hmaHashes) {
+    for (const [algorithm, hash] of Object.entries(opts.hmaHashes)) {
+      push(algorithm, hash);
+    }
+  }
+  if (opts.webhookFileDetails) {
+    push(opts.webhookFileDetails.hashType, opts.webhookFileDetails.hash);
+  }
+  return result.length > 0 ? result : undefined;
+}
+
 /** Resolve the email(s) for `personOrUserReportedPerson`. Prefers the
  * webhook's enriched response (carries NCMEC `type` / `verified` attributes);
  * falls back to a bare field-role email otherwise. Returns undefined when
@@ -713,6 +763,15 @@ type MediaAdditionalInfo = {
   fileName?: string;
   /** When set, sent to NCMEC in file details (whether the content was publicly viewable). */
   publiclyAvailable?: boolean;
+  /** Optional single hash from the additional-info webhook response.
+   * Merged with HMA-sourced hashes (see `toOriginalFileHashes`); deduped
+   * on (`hashType` uppercase, trimmed hash value) so a webhook that
+   * returns the same algorithm as HMA doesn't produce duplicate entries
+   * in the outgoing `originalFileHash[]` list. */
+  fileDetails?: {
+    hash: string;
+    hashType: string;
+  };
 };
 
 type FileAdditionalInfo = {
@@ -1102,9 +1161,6 @@ export default class NcmecReporting {
         media: reportedMedia.map((media) => ({
           id: media.id,
           typeId: media.typeId,
-          fileDetails: {
-            ipCaptureEvent: [],
-          },
         })),
       };
     }
@@ -1958,6 +2014,10 @@ export default class NcmecReporting {
     const fileAnnotations = this.#fileAnnotationArrayToNCMECFileAnnotation(
       media.fileAnnotations,
     );
+    const originalFileHash = toOriginalFileHashes({
+      hmaHashes: media.hashes,
+      webhookFileDetails: additionalInfo.fileDetails,
+    });
     const xml = await this.#uploadFileDetails(
       {
         fileDetails: {
@@ -1970,6 +2030,9 @@ export default class NcmecReporting {
             : {}),
           ...(fileAnnotations ? { fileAnnotations } : {}),
           industryClassification: media.industryClassification,
+          ...(originalFileHash && originalFileHash.length > 0
+            ? { originalFileHash }
+            : {}),
           ...(additionalInfo.ipCaptureEvent &&
           additionalInfo.ipCaptureEvent.length > 0
             ? {
