@@ -1,24 +1,19 @@
+declare namespace Express {
+  // Extend Express.User so passport callbacks (serializeUser, etc.) see the
+  // fields we actually use without per-call `as any` casts.
+  interface User {
+    id: string;
+  }
+}
+
 declare module 'homoglyph-search';
 declare module 'nilsimsa';
-
-declare module 'uuid-apikey';
 
 declare interface String {
   toUpperCase<T extends string>(this: T): Uppercase<T>;
   toLowerCase<T extends string>(this: T): Lowercase<T>;
 }
 
-// Workaround for https://github.com/apollographql/apollo-server/issues/6868
-// At some point, we should just upgrade to Apollo Server 4, but that's a big lift.
-//
-// We also have to fork + override retry-axios, which we don't depend on
-// directly, but it's a dependency of the google maps sdk. However, the version
-// of retry-axios used by the SDK isn't compatible with moduleResolution=nodeNext,
-// so we were getting a type error. Forking the SDK to update retry-axios isn't
-// feasible, because the new version of retry-axios uses a newer axios version,
-// which contains some breaking changes (to param serialization; see
-// https://github.com/axios/axios/pull/4734), which would be hard to update the
-// SDK to account for.
 declare module '@graphql-tools/schema' {
   import { GraphQLSchema } from 'graphql';
 
@@ -241,14 +236,22 @@ namespace NodeJS {
     DATABASE_NAME?: string;
     DATABASE_USER?: string;
     DATABASE_PASSWORD?: string;
+    DATABASE_SSL?: string;
+    DATABASE_POOL_MAX?: string;
+    DATABASE_READ_POOL_MAX?: string;
+    DATABASE_POOL_IDLE_TIMEOUT_MS?: string;
+    DATABASE_POOL_CONNECTION_TIMEOUT_MS?: string;
+    DATABASE_QUERY_TIMEOUT_MS?: string;
+    DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS?: string;
+    DATABASE_PRINT_LOGS?: string;
     SESSION_SECRET?: string;
     WAREHOUSE_ADAPTER?: string;
     ANALYTICS_ADAPTER?: string;
     DATA_WAREHOUSE_PROVIDER?: string;
+    NCMEC_ENV?: string;
     NODE_ENV?: string;
     EXPOSE_SENSITIVE_IMPLEMENTATION_DETAILS_IN_ERRORS?: string;
     ALLOW_USER_INPUT_LOCALHOST_URIS?: string;
-    SEQUELIZE_PRINT_LOGS?: string;
     REDIS_USE_CLUSTER?: string;
     REDIS_HOST?: string;
     REDIS_PORT?: string;

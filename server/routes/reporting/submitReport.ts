@@ -8,6 +8,7 @@ import {
   rawItemSubmissionToItemSubmission,
   type ItemSubmission,
 } from '../../services/itemProcessingService/index.js';
+import { hasOrgId } from '../../utils/apiKeyMiddleware.js';
 import {
   fromCorrelationId,
   toCorrelationId,
@@ -16,7 +17,6 @@ import {
   makeBadRequestError,
   makeInternalServerError,
 } from '../../utils/errors.js';
-import { hasOrgId } from '../../utils/apiKeyMiddleware.js';
 import { withRetries } from '../../utils/misc.js';
 import { type RequestHandlerWithBodies } from '../../utils/route-helpers.js';
 import { isValidDate } from '../../utils/time.js';
@@ -67,7 +67,7 @@ export default function submitReport({
           }),
         );
       }
-      
+
       const { orgId } = req;
 
       const toItemSubmission = rawItemSubmissionToItemSubmission.bind(
@@ -102,11 +102,11 @@ export default function submitReport({
       ) {
         try {
           const images = reportedItem.data.images as string[];
-          
+
           // Get all hash banks for this org once
           const allBanks = await HMAHashBankService.listBanks(orgId);
-          const allBankNames = allBanks.map(bank => bank.hma_name);
-          
+          const allBankNames = allBanks.map((bank) => bank.hma_name);
+
           const imageHashes = await Promise.all(
             images.map(async (url) => {
               if (typeof url === 'string' && url) {
@@ -120,53 +120,66 @@ export default function submitReport({
                     },
                     async () => {
                       return HMAHashBankService.hashContentFromUrl(url);
-                    }
+                    },
                   );
                   const hashes = await hmaHashWithRetries();
-                  
+
                   // Check which banks match this image
                   const matchedBankNames: string[] = [];
-                  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-                  if (hashes && Object.keys(hashes).length > 0 && allBankNames.length > 0) {
+
+                  if (
+                    Object.keys(hashes).length > 0 &&
+                    allBankNames.length > 0
+                  ) {
                     const matchResults = await Promise.all(
                       Object.entries(hashes).map(async ([signalType, hash]) =>
-                        HMAHashBankService.checkImageMatchWithDetails(allBankNames, signalType, hash)
-                      )
+                        HMAHashBankService.checkImageMatchWithDetails(
+                          allBankNames,
+                          signalType,
+                          hash,
+                        ),
+                      ),
                     );
-                    
+
                     // Collect all matched banks
                     const allMatchedHmaBanks = new Set<string>();
-                    matchResults.forEach(result => {
-                      result.matchedBanks.forEach(bank => allMatchedHmaBanks.add(bank));
+                    matchResults.forEach((result) => {
+                      result.matchedBanks.forEach((bank) =>
+                        allMatchedHmaBanks.add(bank),
+                      );
                     });
-                    
+
                     // Map HMA bank names to user-friendly names
-                    allMatchedHmaBanks.forEach(hmaName => {
-                      const bank = allBanks.find(b => b.hma_name === hmaName);
+                    allMatchedHmaBanks.forEach((hmaName) => {
+                      const bank = allBanks.find((b) => b.hma_name === hmaName);
                       if (bank) {
                         matchedBankNames.push(bank.name);
                       }
                     });
                   }
-                  
+
                   return {
                     url,
                     hashes,
-                    matchedBanks: matchedBankNames.length > 0 ? matchedBankNames : undefined
+                    matchedBanks:
+                      matchedBankNames.length > 0
+                        ? matchedBankNames
+                        : undefined,
                   };
                 } catch (e) {
                   return {
                     url,
-                    hashes: {}
+                    hashes: {},
                   };
                 }
               }
               return null;
-            })
+            }),
           );
           // Attach the hashes array to the item submission data
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (reportedItemSubmission.itemSubmission.data as any).images = imageHashes;
+          (reportedItemSubmission.itemSubmission.data as any).images =
+            imageHashes;
         } catch (error) {
           // eslint-disable-next-line no-console
           console.error('Failed to get HMA hashes for images:', error);
@@ -191,9 +204,9 @@ export default function submitReport({
 
       const hasAdditionalItemsOnThreadSubmission = Boolean(
         additionalItemSubmissions &&
-          additionalItemSubmissions.length > 0 &&
-          reportedItemSubmission.error === undefined &&
-          reportedItemSubmission.itemSubmission.itemType.kind === 'THREAD',
+        additionalItemSubmissions.length > 0 &&
+        reportedItemSubmission.error === undefined &&
+        reportedItemSubmission.itemSubmission.itemType.kind === 'THREAD',
       );
 
       const isAllValidContentItems = (
@@ -207,23 +220,30 @@ export default function submitReport({
         );
       };
 
+      const isAllValidItems = (
+        maybeItemSubmissions: Awaited<ReturnType<typeof toItemSubmission>>[],
+      ): maybeItemSubmissions is {
+        itemSubmission: ItemSubmission;
+        error: undefined;
+      }[] => {
+        return maybeItemSubmissions.every((it) => !it.error);
+      };
+
       // We disable this lint rule here and below because using `??` here would
       // match the intended semantics less well/be less clear, but casting these
       // expressions to strict booleans with Boolean() confuses TS control flow
       // analysis.
       const threadOrAdditionalItemsHadInvalidOrIllegalItems =
         (reportedThreadSubmission &&
-          // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
           !isAllValidContentItems(reportedThreadSubmission)) ||
         (additionalItemSubmissions &&
-          !isAllValidContentItems(additionalItemSubmissions));
+          !isAllValidItems(additionalItemSubmissions));
 
       const isInvalidReportedAtDate = !isValidDate(
         new Date(req.body.reportedAt),
       );
       if (
         submittedItemIsInvalid ||
-        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
         threadOrAdditionalItemsHadInvalidOrIllegalItems ||
         hasAdditionalItemsOnThreadSubmission ||
         isInvalidReportedAtDate
@@ -248,7 +268,7 @@ export default function submitReport({
               threadOrAdditionalItemsHadInvalidOrIllegalItems
                 ? [
                     makeBadRequestError(
-                      `Invalid report containing a thread or additional items containing items that aren't entirely Content Types`,
+                      `Invalid report: thread messages must all be valid Content Types, and additional items must all be valid item submissions`,
                       { shouldErrorSpan: true },
                     ),
                   ]
@@ -371,9 +391,7 @@ export default function submitReport({
                     ? [reportedForReason.policyId]
                     : [],
                 };
-                if (
-                  req.body.reportedForReason?.csam
-                ) {
+                if (req.body.reportedForReason?.csam) {
                   await NcmecService.enqueueForHumanReviewIfApplicable({
                     ...commonEnqueueInput,
                     item,
@@ -421,12 +439,19 @@ export default function submitReport({
                       : {}),
                     ...(additionalItemSubmissions
                       ? {
-                          additionalContentItems: additionalItemSubmissions.map(
-                            (it) =>
+                          // MRT's `additionalContentItems` is Content-only, so
+                          // drop non-Content items (e.g. USER); they're still
+                          // indexed above.
+                          additionalContentItems: additionalItemSubmissions
+                            .filter(
+                              (it) =>
+                                it.itemSubmission.itemType.kind === 'CONTENT',
+                            )
+                            .map((it) =>
                               itemSubmissionToItemSubmissionWithTypeIdentifier(
                                 it.itemSubmission,
                               ),
-                          ),
+                            ),
                         }
                       : {}),
                     ...(req.body.reportedItemsInThread

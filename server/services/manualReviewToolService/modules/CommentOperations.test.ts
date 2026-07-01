@@ -1,10 +1,11 @@
 import { v1 as uuidv1 } from 'uuid';
 
 import getBottle from '../../../iocContainer/index.js';
-import { UserPermission } from '../../../models/types/permissioning.js';
 import createOrg from '../../../test/fixtureHelpers/createOrg.js';
 import createUser from '../../../test/fixtureHelpers/createUser.js';
 import { makeTestWithFixture } from '../../../test/utils.js';
+import { UserPermission } from '../../userManagementService/index.js';
+import { type JobId } from '../manualReviewToolService.js';
 import CommentOperations from './CommentOperations.js';
 
 describe('CommentOperations', () => {
@@ -16,31 +17,34 @@ describe('CommentOperations', () => {
     // Create test org
     const orgId = uuidv1();
     const { cleanup: orgCleanup } = await createOrg(
-      { Org: container.Sequelize.Org },
-      container.ModerationConfigService,
-      container.ApiKeyService,
+      {
+        KyselyPg: container.KyselyPg,
+        ModerationConfigService: container.ModerationConfigService,
+        ApiKeyService: container.ApiKeyService,
+      },
       orgId,
     );
 
     // Create test user
     const { user, cleanup: userCleanup } = await createUser(
-      container.Sequelize,
+      container.KyselyPg,
       orgId,
     );
 
     // Create a queue (required for job_creations foreign key)
-    const queue = await container.ManualReviewToolService.createManualReviewQueue({
-      name: 'Test Queue',
-      description: null,
-      userIds: [user.id],
-      hiddenActionIds: [],
-      isAppealsQueue: false,
-      invokedBy: {
-        userId: user.id,
-        permissions: [UserPermission.EDIT_MRT_QUEUES],
-        orgId,
-      },
-    });
+    const queue =
+      await container.ManualReviewToolService.createManualReviewQueue({
+        name: 'Test Queue',
+        description: null,
+        userIds: [user.id],
+        hiddenActionIds: [],
+        isAppealsQueue: false,
+        invokedBy: {
+          userId: user.id,
+          permissions: [UserPermission.EDIT_MRT_QUEUES],
+          orgId,
+        },
+      });
 
     // Create test item identifiers and jobs
     const itemId = uuidv1();
@@ -52,7 +56,7 @@ describe('CommentOperations', () => {
       .insertInto('manual_review_tool.job_creations')
       .values([
         {
-          id: jobId1 as any,
+          id: jobId1 as JobId,
           org_id: orgId,
           item_id: itemId,
           item_type_id: itemTypeId,
@@ -61,7 +65,7 @@ describe('CommentOperations', () => {
           enqueue_source_info: {},
         },
         {
-          id: jobId2 as any,
+          id: jobId2 as JobId,
           org_id: orgId,
           item_id: itemId,
           item_type_id: itemTypeId,
@@ -118,8 +122,7 @@ describe('CommentOperations', () => {
       async ({ commentOps, orgId }) => {
         const nonExistentJobId = uuidv1();
 
-        // Access private method for testing
-        const result = await (commentOps as any).getRelatedJobIds({
+        const result = await commentOps['getRelatedJobIds']({
           orgId,
           jobId: nonExistentJobId,
         });
@@ -131,7 +134,7 @@ describe('CommentOperations', () => {
     testWithFixtures(
       'should return all related job IDs when job found in job_creations',
       async ({ commentOps, orgId, jobId1, jobId2 }) => {
-        const result = await (commentOps as any).getRelatedJobIds({
+        const result = await commentOps['getRelatedJobIds']({
           orgId,
           jobId: jobId1,
         });
@@ -162,7 +165,10 @@ describe('CommentOperations', () => {
           })
           .execute();
 
-        const result = await commentOps.getComments({ orgId, jobId: singleJobId });
+        const result = await commentOps.getComments({
+          orgId,
+          jobId: singleJobId,
+        });
 
         expect(result).toHaveLength(1);
         expect(result[0].commentText).toBe('Test comment');
@@ -260,7 +266,10 @@ describe('CommentOperations', () => {
     testWithFixtures(
       'should return 0 when no comments found',
       async ({ commentOps, orgId, jobId1 }) => {
-        const result = await commentOps.getCommentCount({ orgId, jobId: jobId1 });
+        const result = await commentOps.getCommentCount({
+          orgId,
+          jobId: jobId1,
+        });
 
         expect(result).toBe(0);
       },
@@ -300,7 +309,10 @@ describe('CommentOperations', () => {
           ])
           .execute();
 
-        const result = await commentOps.getCommentCount({ orgId, jobId: jobId1 });
+        const result = await commentOps.getCommentCount({
+          orgId,
+          jobId: jobId1,
+        });
 
         expect(result).toBe(3);
       },
@@ -459,7 +471,10 @@ describe('CommentOperations', () => {
           authorId: userId,
         });
 
-        const result = await commentOps.getCommentCount({ orgId, jobId: jobId2 });
+        const result = await commentOps.getCommentCount({
+          orgId,
+          jobId: jobId2,
+        });
 
         expect(result).toBe(3);
       },

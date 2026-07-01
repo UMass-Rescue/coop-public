@@ -1,13 +1,9 @@
 /* eslint-disable max-lines */
-import { AuthenticationError } from 'apollo-server-core';
 import _ from 'lodash';
 
-import {
-  getPermissionsForRole,
-  UserPermission,
-} from '../../models/types/permissioning.js';
 import { itemSubmissionWithTypeIdentifierToItemSubmission } from '../../services/itemProcessingService/index.js';
 import { NCMECIncidentType as NCMECIncidentTypeValues } from '../../services/ncmecService/index.js';
+import { UserPermission } from '../../services/userManagementService/index.js';
 import {
   asyncIterableToArray,
   filterNullOrUndefined,
@@ -39,25 +35,40 @@ import {
   type GQLUserManualReviewJobPayloadResolvers,
 } from '../generated.js';
 import { formatItemSubmissionForGQL } from '../types.js';
+import { forbiddenError, unauthenticatedError } from '../utils/errors.js';
 import { gqlErrorResult, gqlSuccessResult } from '../utils/gqlResult.js';
 import { oneOfInputToTaggedUnion } from '../utils/inputHelpers.js';
 
-const { omit, sum, sumBy } = _;
+const { omit, sumBy } = _;
 
 const typeDefs = /* GraphQL */ `
+  enum MrtClearReportsDisposition {
+    AUTOMATIC_CLOSE
+    IGNORE
+    SAME_ACTION
+  }
+
+  enum MrtClearReportsScope {
+    CURRENT_QUEUE
+    ALL_QUEUES
+  }
+
   type ManualReviewQueue {
     id: ID!
     name: String!
     description: String
     orgId: ID!
     isDefaultQueue: Boolean!
-    jobs(ids: [ID!]): [ManualReviewJob!]!
+    jobs(ids: [ID!], limit: Int): [ManualReviewJob!]!
     pendingJobCount: Int!
     oldestJobCreatedAt: DateTime
     explicitlyAssignedReviewers: [User!]!
     hiddenActionIds: [ID!]!
     isAppealsQueue: Boolean!
     autoCloseJobs: Boolean!
+    clearReportsDisposition: MrtClearReportsDisposition
+    clearReportsScope: MrtClearReportsScope!
+    clearReportsTriggerActionIds: [ID!]!
   }
 
   type ManualReviewJob {
@@ -72,6 +83,11 @@ const typeDefs = /* GraphQL */ `
   type ItemSubmissions {
     latest: Item!
     prior: [Item!]
+    """
+    True when this item was synthesized server-side from indirect references
+    rather than a real submission. \`latest.data\` is empty when set.
+    """
+    isSynthetic: Boolean
   }
 
   type ItemWithParents {
@@ -101,7 +117,7 @@ const typeDefs = /* GraphQL */ `
   }
 
   union ManualReviewJobEnqueueSourceInfo =
-      ReportEnqueueSourceInfo
+    | ReportEnqueueSourceInfo
     | RuleExecutionEnqueueSourceInfo
     | MrtJobEnqueueSourceInfo
     | PostActionsEnqueueSourceInfo
@@ -202,7 +218,7 @@ const typeDefs = /* GraphQL */ `
   }
 
   union ManualReviewJobPayload =
-      ContentManualReviewJobPayload
+    | ContentManualReviewJobPayload
     | UserManualReviewJobPayload
     | ThreadManualReviewJobPayload
     | NcmecManualReviewJobPayload
@@ -238,6 +254,7 @@ const typeDefs = /* GraphQL */ `
     reportedMessages: [NcmecThreadInput!]!
     incidentType: NCMECIncidentType!
     escalateToHighPriority: String
+    additionalInfo: String
   }
 
   enum AppealDecision {
@@ -334,12 +351,32 @@ const typeDefs = /* GraphQL */ `
     requestId: String
   }
 
+  type MissingRequiredDecisionReasonError implements Error {
+    title: String!
+    status: Int!
+    type: [String!]!
+    pointer: String
+    detail: String
+    requestId: String
+  }
+
+  type MissingRequiredPolicyForDecisionError implements Error {
+    title: String!
+    status: Int!
+    type: [String!]!
+    pointer: String
+    detail: String
+    requestId: String
+  }
+
   union SubmitDecisionResponse =
-      SubmitDecisionSuccessResponse
+    | SubmitDecisionSuccessResponse
     | JobHasAlreadyBeenSubmittedError
     | SubmittedJobActionNotFoundError
     | NoJobWithIdInQueueError
     | RecordingJobDecisionFailedError
+    | MissingRequiredDecisionReasonError
+    | MissingRequiredPolicyForDecisionError
 
   union DequeueManualReviewJobResponse = DequeueManualReviewJobSuccessResponse
 
@@ -363,11 +400,11 @@ const typeDefs = /* GraphQL */ `
   }
 
   union CreateManualReviewQueueResponse =
-      MutateManualReviewQueueSuccessResponse
+    | MutateManualReviewQueueSuccessResponse
     | ManualReviewQueueNameExistsError
 
   union UpdateManualReviewQueueQueueResponse =
-      MutateManualReviewQueueSuccessResponse
+    | MutateManualReviewQueueSuccessResponse
     | ManualReviewQueueNameExistsError
     | NotFoundError
 
@@ -378,6 +415,9 @@ const typeDefs = /* GraphQL */ `
     hiddenActionIds: [ID!]!
     isAppealsQueue: Boolean!
     autoCloseJobs: Boolean!
+    clearReportsDisposition: MrtClearReportsDisposition
+    clearReportsScope: MrtClearReportsScope
+    clearReportsTriggerActionIds: [ID!]
   }
 
   input UpdateManualReviewQueueInput {
@@ -388,6 +428,9 @@ const typeDefs = /* GraphQL */ `
     actionIdsToHide: [ID!]!
     actionIdsToUnhide: [ID!]!
     autoCloseJobs: Boolean!
+    clearReportsDisposition: MrtClearReportsDisposition
+    clearReportsScope: MrtClearReportsScope
+    clearReportsTriggerActionIds: [ID!]
   }
 
   input AddAccessibleQueuesToUserInput {
@@ -405,10 +448,10 @@ const typeDefs = /* GraphQL */ `
   }
 
   union AddAccessibleQueuesToUserResponse =
-      MutateAccessibleQueuesForUserSuccessResponse
+    | MutateAccessibleQueuesForUserSuccessResponse
 
   union RemoveAccessibleQueuesToUserResponse =
-      MutateAccessibleQueuesForUserSuccessResponse
+    | MutateAccessibleQueuesForUserSuccessResponse
     | NotFoundError
 
   type DeleteAllJobsFromQueueSuccessResponse {
@@ -425,8 +468,30 @@ const typeDefs = /* GraphQL */ `
   }
 
   union DeleteAllJobsFromQueueResponse =
-      DeleteAllJobsFromQueueSuccessResponse
+    | DeleteAllJobsFromQueueSuccessResponse
     | DeleteAllJobsUnauthorizedError
+
+  input InvalidateReportsFromReporterInput {
+    reporter: ReporterIdInput!
+    reason: String
+    """
+    Scopes the sweep to a single MRT job. When omitted, every pending job
+    in the caller's org is scanned.
+    """
+    jobId: ID
+  }
+
+  type InvalidateReportsFromReporterSuccessResponse {
+    queuesScanned: Int!
+    jobsScanned: Int!
+    jobsScrubbed: Int!
+    jobsDeleted: Int!
+    reportsRemoved: Int!
+    """
+    True when a queue exceeded the per-queue scan cap, so the sweep was partial.
+    """
+    truncated: Boolean!
+  }
 
   enum MetricsTimeDivisionOptions {
     DAY
@@ -674,7 +739,7 @@ const typeDefs = /* GraphQL */ `
   }
 
   union ManualReviewChartSettings =
-      GetDecisionCountSettings
+    | GetDecisionCountSettings
     | GetJobCreationCountSettings
 
   input ManualReviewChartSettingsInput {
@@ -742,7 +807,7 @@ const typeDefs = /* GraphQL */ `
   }
 
   union ManualReviewDecisionComponent =
-      IgnoreDecisionComponent
+    | IgnoreDecisionComponent
     | UserOrRelatedActionDecisionComponent
     | SubmitNCMECReportDecisionComponent
     | TransformJobAndRecreateInQueueDecisionComponent
@@ -828,7 +893,7 @@ const typeDefs = /* GraphQL */ `
 
   type ManualReviewJobComment {
     id: ID!
-    author: User!
+    author: User
     commentText: String!
     createdAt: DateTime!
   }
@@ -856,7 +921,7 @@ const typeDefs = /* GraphQL */ `
     comment: ManualReviewJobComment!
   }
   union AddManualReviewJobCommentResponse =
-      AddManualReviewJobCommentSuccessResponse
+    | AddManualReviewJobCommentSuccessResponse
     | NotFoundError
 
   type ManualReviewJobWithDecisions {
@@ -926,6 +991,16 @@ const typeDefs = /* GraphQL */ `
       input: RemoveAccessibleQueuesToUserInput!
     ): RemoveAccessibleQueuesToUserResponse!
     deleteAllJobsFromQueue(queueId: ID!): DeleteAllJobsFromQueueResponse!
+    """
+    Strips every entry sent by the given reporter from the report history of
+    every pending MRT job in the caller's org. If a job's history becomes
+    empty and it was originally enqueued from a user report, the job itself
+    is removed. Intentionally non-persistent: future reports from the same
+    reporter are NOT blocked. See issue #404.
+    """
+    invalidateReportsFromReporter(
+      input: InvalidateReportsFromReporterInput!
+    ): InvalidateReportsFromReporterSuccessResponse!
     createManualReviewJobComment(
       input: CreateManualReviewJobCommentInput!
     ): AddManualReviewJobCommentResponse!
@@ -998,7 +1073,6 @@ const ManualReviewJobPayload: GQLManualReviewJobPayloadResolvers = {
   },
 };
 
-
 const ContentManualReviewJobPayload: GQLContentManualReviewJobPayloadResolvers =
   {
     async item(it, _, context) {
@@ -1020,8 +1094,11 @@ const ContentManualReviewJobPayload: GQLContentManualReviewJobPayloadResolvers =
         throw new Error('Invalid item type in content item type resolver');
       }
 
-      const itemSubmission = itemSubmissionWithTypeIdentifierToItemSubmission(it.item, type);
-      
+      const itemSubmission = itemSubmissionWithTypeIdentifierToItemSubmission(
+        it.item,
+        type,
+      );
+
       // Matched banks are now stored directly in the item data during submission
       return formatItemSubmissionForGQL(itemSubmission);
     },
@@ -1103,17 +1180,17 @@ const ContentManualReviewJobPayload: GQLContentManualReviewJobPayloadResolvers =
         case 'REPORT':
         case 'POST_ACTIONS':
           return { kind: enqueueSourceInfo.kind };
-        case 'RULE_EXECUTION':
-          const org = await context.dataSources.orgAPI.getGraphQLOrgFromId(
+        case 'RULE_EXECUTION': {
+          const rules = await context.dataSources.ruleAPI.getGraphQLRulesForOrg(
             user.orgId,
           );
-          const rules = await org.getRules();
           return {
             kind: enqueueSourceInfo.kind,
             rules: rules.filter((rule) =>
               enqueueSourceInfo.rules.includes(rule.id),
             ),
           };
+        }
         default:
           assertUnreachable(enqueueSourceInfo);
       }
@@ -1319,17 +1396,17 @@ const UserManualReviewJobPayload: GQLUserManualReviewJobPayloadResolvers = {
       case 'REPORT':
       case 'POST_ACTIONS':
         return { kind: enqueueSourceInfo.kind };
-      case 'RULE_EXECUTION':
-        const org = await context.dataSources.orgAPI.getGraphQLOrgFromId(
+      case 'RULE_EXECUTION': {
+        const rules = await context.dataSources.ruleAPI.getGraphQLRulesForOrg(
           user.orgId,
         );
-        const rules = await org.getRules();
         return {
           kind: enqueueSourceInfo.kind,
           rules: rules.filter((rule) =>
             enqueueSourceInfo.rules.includes(rule.id),
           ),
         };
+      }
       default:
         assertUnreachable(enqueueSourceInfo);
     }
@@ -1488,17 +1565,17 @@ const ThreadManualReviewJobPayload: GQLThreadManualReviewJobPayloadResolvers = {
       case 'REPORT':
       case 'POST_ACTIONS':
         return { kind: enqueueSourceInfo.kind };
-      case 'RULE_EXECUTION':
-        const org = await context.dataSources.orgAPI.getGraphQLOrgFromId(
+      case 'RULE_EXECUTION': {
+        const rules = await context.dataSources.ruleAPI.getGraphQLRulesForOrg(
           user.orgId,
         );
-        const rules = await org.getRules();
         return {
           kind: enqueueSourceInfo.kind,
           rules: rules.filter((rule) =>
             enqueueSourceInfo.rules.includes(rule.id),
           ),
         };
+      }
       default:
         assertUnreachable(enqueueSourceInfo);
     }
@@ -1614,17 +1691,17 @@ const NcmecManualReviewJobPayload: GQLNcmecManualReviewJobPayloadResolvers = {
       case 'REPORT':
       case 'POST_ACTIONS':
         return { kind: enqueueSourceInfo.kind };
-      case 'RULE_EXECUTION':
-        const org = await context.dataSources.orgAPI.getGraphQLOrgFromId(
+      case 'RULE_EXECUTION': {
+        const rules = await context.dataSources.ruleAPI.getGraphQLRulesForOrg(
           user.orgId,
         );
-        const rules = await org.getRules();
         return {
           kind: enqueueSourceInfo.kind,
           rules: rules.filter((rule) =>
             enqueueSourceInfo.rules.includes(rule.id),
           ),
         };
+      }
       default:
         assertUnreachable(enqueueSourceInfo);
     }
@@ -1632,22 +1709,28 @@ const NcmecManualReviewJobPayload: GQLNcmecManualReviewJobPayloadResolvers = {
 };
 
 const ManualReviewQueue: GQLManualReviewQueueResolvers = {
-  async jobs(queue, { ids: jobIds }, context) {
+  async jobs(queue, { ids: jobIds, limit }, context) {
     const { orgId, id: queueId } = queue;
 
-    if (!jobIds) {
+    if (jobIds == null) {
       return context.services.ManualReviewToolService.getAllJobsForQueue({
         orgId,
         queueId,
-      });
-    } else {
-      return context.services.ManualReviewToolService.getJobsForQueue({
-        orgId,
-        queueId,
-        jobIds,
-        isAppealsQueue: queue.isAppealsQueue,
+        limit: limit ?? undefined,
       });
     }
+    // Empty array means "filter to no IDs" -> result is always []. Short-circuit
+    // so we don't open a Bull/Redis queue handle per reviewable queue on every
+    // MRT page load before a job has been dequeued.
+    if (jobIds.length === 0) {
+      return [];
+    }
+    return context.services.ManualReviewToolService.getJobsForQueue({
+      orgId,
+      queueId,
+      jobIds,
+      isAppealsQueue: queue.isAppealsQueue,
+    });
   },
   async pendingJobCount(queue, _, context) {
     const { orgId, id: queueId } = queue;
@@ -1667,7 +1750,7 @@ const ManualReviewQueue: GQLManualReviewQueueResolvers = {
   async explicitlyAssignedReviewers(queue, _, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('User required.');
+      throw unauthenticatedError('User required.');
     }
     const { id: userId, orgId } = user;
 
@@ -1683,7 +1766,7 @@ const ManualReviewQueue: GQLManualReviewQueueResolvers = {
   async hiddenActionIds(queue, _, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('User required.');
+      throw unauthenticatedError('User required.');
     }
     const { orgId } = user;
     const { id: queueId } = queue;
@@ -1692,6 +1775,18 @@ const ManualReviewQueue: GQLManualReviewQueueResolvers = {
       orgId,
       queueId,
     });
+  },
+  async clearReportsTriggerActionIds(queue, _, context) {
+    const user = context.getUser();
+    if (user == null) {
+      throw unauthenticatedError('User required.');
+    }
+    return context.services.ManualReviewToolService.getClearReportsTriggerActionsForQueue(
+      {
+        orgId: user.orgId,
+        queueId: queue.id,
+      },
+    );
   },
 };
 
@@ -1702,10 +1797,14 @@ const ManualReviewJobComment: GQLManualReviewJobCommentResolvers = {
       throw new Error('No user found on context');
     }
 
-    return context.dataSources.userAPI.getGraphQLUserFromId({
-      id: comment.authorId,
-      orgId: user.orgId,
-    });
+    try {
+      return await context.dataSources.userAPI.getGraphQLUserFromId({
+        id: comment.authorId,
+        orgId: user.orgId,
+      });
+    } catch {
+      return null;
+    }
   },
 };
 
@@ -1745,7 +1844,7 @@ const Query: GQLQueryResolvers = {
   async getDecisionCounts(_: unknown, { input }, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
     }
     return context.services.ManualReviewToolService.getDecisionCounts({
       ...input,
@@ -1765,7 +1864,7 @@ const Query: GQLQueryResolvers = {
   async getJobCreationCounts(_: unknown, { input }, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
     }
     const result =
       await context.services.ManualReviewToolService.getJobCreationCounts({
@@ -1793,7 +1892,7 @@ const Query: GQLQueryResolvers = {
   async getResolvedJobCounts(_: unknown, { input }, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
     }
     const result =
       await context.services.ManualReviewToolService.getResolvedJobCounts({
@@ -1818,7 +1917,7 @@ const Query: GQLQueryResolvers = {
   async getSkippedJobCounts(_: unknown, { input }, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
     }
     const result =
       await context.services.ManualReviewToolService.getSkippedJobCounts({
@@ -1844,7 +1943,7 @@ const Query: GQLQueryResolvers = {
   async getResolvedJobsForUser(_: unknown, { timeZone }, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
     }
 
     const counts =
@@ -1870,7 +1969,7 @@ const Query: GQLQueryResolvers = {
   async getSkippedJobsForUser(_: unknown, { timeZone }, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
     }
 
     const counts =
@@ -1896,7 +1995,7 @@ const Query: GQLQueryResolvers = {
   async getTimeToAction(_: unknown, { input }, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
     }
     const result =
       await context.services.ManualReviewToolService.getDecisionTimeToAction({
@@ -1916,28 +2015,23 @@ const Query: GQLQueryResolvers = {
   async getTotalPendingJobsCount(_: unknown, __: unknown, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
     }
     const allQueues =
       await context.services.ManualReviewToolService.getAllQueuesForOrgAndDangerouslyBypassPermissioning(
         { orgId: user.orgId },
       );
 
-    const jobsPerQueue = await Promise.all(
-      allQueues.map(async (queue) =>
-        context.services.ManualReviewToolService.getPendingJobCount({
-          orgId: user.orgId,
-          queueId: queue.id,
-        }),
-      ),
+    return context.services.ManualReviewToolService.getTotalPendingJobCountForQueues(
+      user.orgId,
+      allQueues.map((q) => q.id),
     );
-    return sum(jobsPerQueue);
   },
 
   async getRecentDecisions(_: unknown, { input }, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
     }
     const permissions = user.getPermissions();
     const { filter, page } = input;
@@ -1956,20 +2050,20 @@ const Query: GQLQueryResolvers = {
                         actionIds: it.userOrRelatedActionDecision.actionIds,
                       }
                     : it.ignoreDecision
-                    ? { type: 'IGNORE' }
-                    : it.submitNcmecReportDecision
-                    ? { type: 'SUBMIT_NCMEC_REPORT' }
-                    : it.transformJobAndRecreateInQueueDecision
-                    ? { type: 'TRANSFORM_JOB_AND_RECREATE_IN_QUEUE' }
-                    : it.acceptAppealDecision
-                    ? {
-                        type: 'ACCEPT_APPEAL',
-                      }
-                    : it.rejectAppealDecision
-                    ? {
-                        type: 'REJECT_APPEAL',
-                      }
-                    : undefined,
+                      ? { type: 'IGNORE' }
+                      : it.submitNcmecReportDecision
+                        ? { type: 'SUBMIT_NCMEC_REPORT' }
+                        : it.transformJobAndRecreateInQueueDecision
+                          ? { type: 'TRANSFORM_JOB_AND_RECREATE_IN_QUEUE' }
+                          : it.acceptAppealDecision
+                            ? {
+                                type: 'ACCEPT_APPEAL',
+                              }
+                            : it.rejectAppealDecision
+                              ? {
+                                  type: 'REJECT_APPEAL',
+                                }
+                              : undefined,
                 ),
               )
             : undefined,
@@ -1986,7 +2080,7 @@ const Query: GQLQueryResolvers = {
   async getDecidedJob(_: unknown, { id }, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
     }
 
     return context.services.ManualReviewToolService.getDecidedJob({
@@ -1997,7 +2091,7 @@ const Query: GQLQueryResolvers = {
   async getDecidedJobFromJobId(_: unknown, { id }, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
     }
 
     return context.services.ManualReviewToolService.getDecidedJobFromJobId({
@@ -2013,7 +2107,7 @@ const Query: GQLQueryResolvers = {
   ) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('User required.');
+      throw unauthenticatedError('User required.');
     }
 
     const queue =
@@ -2025,7 +2119,7 @@ const Query: GQLQueryResolvers = {
   async getCommentsForJob(_: unknown, { jobId }, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('User required.');
+      throw unauthenticatedError('User required.');
     }
     return context.services.ManualReviewToolService.getJobComments({
       orgId: user.orgId,
@@ -2035,7 +2129,7 @@ const Query: GQLQueryResolvers = {
   async getExistingJobsForItem(_, params, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
     }
 
     return context.services.ManualReviewToolService.getExistingJobsForItem({
@@ -2047,7 +2141,7 @@ const Query: GQLQueryResolvers = {
   async getDecisionsTable(_, params, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
     }
 
     return context.services.ManualReviewToolService.getDecisionCountsTable({
@@ -2064,7 +2158,7 @@ const Query: GQLQueryResolvers = {
   async getSkipsForRecentDecisions(_, { input }, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
     }
     const filter = input.filter;
 
@@ -2082,20 +2176,20 @@ const Query: GQLQueryResolvers = {
                         actionIds: it.userOrRelatedActionDecision.actionIds,
                       }
                     : it.ignoreDecision
-                    ? { type: 'IGNORE' }
-                    : it.submitNcmecReportDecision
-                    ? { type: 'SUBMIT_NCMEC_REPORT' }
-                    : it.transformJobAndRecreateInQueueDecision
-                    ? { type: 'TRANSFORM_JOB_AND_RECREATE_IN_QUEUE' }
-                    : it.acceptAppealDecision
-                    ? {
-                        type: 'ACCEPT_APPEAL',
-                      }
-                    : it.rejectAppealDecision
-                    ? {
-                        type: 'REJECT_APPEAL',
-                      }
-                    : undefined,
+                      ? { type: 'IGNORE' }
+                      : it.submitNcmecReportDecision
+                        ? { type: 'SUBMIT_NCMEC_REPORT' }
+                        : it.transformJobAndRecreateInQueueDecision
+                          ? { type: 'TRANSFORM_JOB_AND_RECREATE_IN_QUEUE' }
+                          : it.acceptAppealDecision
+                            ? {
+                                type: 'ACCEPT_APPEAL',
+                              }
+                            : it.rejectAppealDecision
+                              ? {
+                                  type: 'REJECT_APPEAL',
+                                }
+                              : undefined,
                 ),
               )
             : undefined,
@@ -2112,7 +2206,7 @@ const Mutation: GQLMutationResolvers = {
   async dequeueManualReviewJob(_, { queueId }, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('User required.');
+      throw unauthenticatedError('User required.');
     }
 
     const { id: userId, orgId } = user;
@@ -2139,7 +2233,7 @@ const Mutation: GQLMutationResolvers = {
   async submitManualReviewDecision(_, params, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('User required.');
+      throw unauthenticatedError('User required.');
     }
 
     const { id: userId, orgId, email: userEmail } = user;
@@ -2190,7 +2284,9 @@ const Mutation: GQLMutationResolvers = {
             case 'SUBMIT_NCMEC_REPORT':
               return {
                 ...decision,
-                escalateToHighPriority: decision.escalateToHighPriority ?? undefined,
+                escalateToHighPriority:
+                  decision.escalateToHighPriority ?? undefined,
+                additionalInfo: decision.additionalInfo ?? undefined,
               };
 
             default:
@@ -2230,7 +2326,9 @@ const Mutation: GQLMutationResolvers = {
         isCoopErrorOfType(e, 'JobHasAlreadyBeenSubmittedError') ||
         isCoopErrorOfType(e, 'SubmittedJobActionNotFoundError') ||
         isCoopErrorOfType(e, 'NoJobWithIdInQueueError') ||
-        isCoopErrorOfType(e, 'RecordingJobDecisionFailedError')
+        isCoopErrorOfType(e, 'RecordingJobDecisionFailedError') ||
+        isCoopErrorOfType(e, 'MissingRequiredDecisionReasonError') ||
+        isCoopErrorOfType(e, 'MissingRequiredPolicyForDecisionError')
       ) {
         return gqlErrorResult(e);
       }
@@ -2241,7 +2339,7 @@ const Mutation: GQLMutationResolvers = {
   async createManualReviewQueue(_, params, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
     }
 
     const {
@@ -2251,6 +2349,9 @@ const Mutation: GQLMutationResolvers = {
       hiddenActionIds,
       isAppealsQueue,
       autoCloseJobs,
+      clearReportsDisposition,
+      clearReportsScope,
+      clearReportsTriggerActionIds,
     } = params.input;
     try {
       const queue =
@@ -2261,6 +2362,10 @@ const Mutation: GQLMutationResolvers = {
           hiddenActionIds,
           isAppealsQueue,
           autoCloseJobs,
+          clearReportsDisposition,
+          clearReportsScope: clearReportsScope ?? undefined,
+          clearReportsTriggerActionIds:
+            clearReportsTriggerActionIds ?? undefined,
           invokedBy: {
             userId: user.id,
             permissions: user.getPermissions(),
@@ -2283,11 +2388,11 @@ const Mutation: GQLMutationResolvers = {
   },
   async updateManualReviewQueue(_, params, context) {
     const user = context.getUser();
-    if (
-      user == null ||
-      !user.getPermissions().includes(UserPermission.EDIT_MRT_QUEUES)
-    ) {
-      throw new AuthenticationError('Authenticated user required');
+    if (user == null) {
+      throw unauthenticatedError('Authenticated user required');
+    }
+    if (!user.getPermissions().includes(UserPermission.EDIT_MRT_QUEUES)) {
+      throw forbiddenError('User does not have permission to edit MRT queues');
     }
 
     const {
@@ -2298,6 +2403,9 @@ const Mutation: GQLMutationResolvers = {
       actionIdsToHide,
       actionIdsToUnhide,
       autoCloseJobs,
+      clearReportsDisposition,
+      clearReportsScope,
+      clearReportsTriggerActionIds,
     } = params.input;
     try {
       const queue =
@@ -2312,6 +2420,10 @@ const Mutation: GQLMutationResolvers = {
           actionIdsToHide,
           actionIdsToUnhide,
           autoCloseJobs,
+          clearReportsDisposition,
+          clearReportsScope: clearReportsScope ?? undefined,
+          clearReportsTriggerActionIds:
+            clearReportsTriggerActionIds ?? undefined,
         });
       return gqlSuccessResult(
         { data: queue },
@@ -2327,11 +2439,11 @@ const Mutation: GQLMutationResolvers = {
   },
   async deleteManualReviewQueue(_, params, context) {
     const user = context.getUser();
-    if (
-      user == null ||
-      !user.getPermissions().includes(UserPermission.EDIT_MRT_QUEUES)
-    ) {
-      throw new AuthenticationError('Authenticated user required');
+    if (user == null) {
+      throw unauthenticatedError('Authenticated user required');
+    }
+    if (!user.getPermissions().includes(UserPermission.EDIT_MRT_QUEUES)) {
+      throw forbiddenError('User does not have permission to edit MRT queues');
     }
 
     return context.services.ManualReviewToolService.deleteManualReviewQueue(
@@ -2341,17 +2453,18 @@ const Mutation: GQLMutationResolvers = {
   },
   async addAccessibleQueuesToUser(_, params, context) {
     const user = context.getUser();
-    if (
-      user == null ||
-      !user.getPermissions().includes(UserPermission.EDIT_MRT_QUEUES)
-    ) {
-      throw new AuthenticationError('Authenticated user required');
+    if (user == null) {
+      throw unauthenticatedError('Authenticated user required');
+    }
+    if (!user.getPermissions().includes(UserPermission.EDIT_MRT_QUEUES)) {
+      throw forbiddenError('User does not have permission to edit MRT queues');
     }
 
-    await context.services.ManualReviewToolService.addAccessibleQueuesForUser(
-      params.input.userId,
-      params.input.queueIds,
-    );
+    await context.services.ManualReviewToolService.addAccessibleQueuesForUser({
+      orgId: user.orgId,
+      userId: params.input.userId,
+      queueIds: params.input.queueIds,
+    });
 
     // TODO: try/catch and return failure cases
     return gqlSuccessResult(
@@ -2361,16 +2474,19 @@ const Mutation: GQLMutationResolvers = {
   },
   async removeAccessibleQueuesToUser(_, params, context) {
     const user = context.getUser();
-    if (
-      user == null ||
-      !user.getPermissions().includes(UserPermission.EDIT_MRT_QUEUES)
-    ) {
-      throw new AuthenticationError('Authenticated user required');
+    if (user == null) {
+      throw unauthenticatedError('Authenticated user required');
+    }
+    if (!user.getPermissions().includes(UserPermission.EDIT_MRT_QUEUES)) {
+      throw forbiddenError('User does not have permission to edit MRT queues');
     }
 
     await context.services.ManualReviewToolService.removeAccessibleQueuesForUser(
-      params.input.userId,
-      params.input.queueIds,
+      {
+        orgId: user.orgId,
+        userId: params.input.userId,
+        queueIds: params.input.queueIds,
+      },
     );
 
     // TODO: try/catch and return failure cases
@@ -2385,13 +2501,18 @@ const Mutation: GQLMutationResolvers = {
     // that are being deleted
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
+    }
+    // Admin-only: irreversible (pending payloads only live in Redis).
+    // Recovery is via `server/bin/recover-mrt-queue.ts`.
+    if (!user.getPermissions().includes(UserPermission.MANAGE_ORG)) {
+      throw forbiddenError('Only org admins can delete all jobs from a queue');
     }
     try {
       await context.services.ManualReviewToolService.deleteAllJobsFromQueue({
         orgId: user.orgId,
         queueId: params.queueId,
-        userPermissions: getPermissionsForRole(user.role),
+        userPermissions: user.getPermissions(),
       });
       return gqlSuccessResult(
         { _: true },
@@ -2405,10 +2526,36 @@ const Mutation: GQLMutationResolvers = {
       throw e;
     }
   },
+  async invalidateReportsFromReporter(_, { input }, context) {
+    const user = context.getUser();
+    if (user == null) {
+      throw unauthenticatedError('Authenticated user required');
+    }
+    const permissions = user.getPermissions();
+    if (!permissions.includes(UserPermission.EDIT_MRT_QUEUES)) {
+      throw forbiddenError(
+        'User does not have permission to invalidate reports',
+      );
+    }
+
+    return context.services.ManualReviewToolService.invalidateReportsFromReporter(
+      {
+        orgId: user.orgId,
+        reporter: { typeId: input.reporter.typeId, id: input.reporter.id },
+        reason: input.reason ?? undefined,
+        jobId: input.jobId ?? undefined,
+        invokedBy: {
+          userId: user.id,
+          permissions,
+          orgId: user.orgId,
+        },
+      },
+    );
+  },
   async createManualReviewJobComment(_, params, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
     }
 
     try {
@@ -2436,7 +2583,7 @@ const Mutation: GQLMutationResolvers = {
   async deleteManualReviewJobComment(_, params, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
     }
 
     const { id: userId, orgId } = user;
@@ -2456,7 +2603,7 @@ const Mutation: GQLMutationResolvers = {
   async logSkip(_, { input }, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
     }
     try {
       await context.services.ManualReviewToolService.logSkip({
@@ -2473,7 +2620,7 @@ const Mutation: GQLMutationResolvers = {
   async releaseJobLock(_, { input }, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
     }
     try {
       await context.services.ManualReviewToolService.releaseJobLock({
@@ -2528,14 +2675,22 @@ const ManualReviewChartSettings: GQLManualReviewChartSettingsResolvers = {
 };
 
 const NCMECIncidentType = {
-  CHILD_PORNOGRAPHY: NCMECIncidentTypeValues['Child Pornography (possession, manufacture, and distribution)'],
+  CHILD_PORNOGRAPHY:
+    NCMECIncidentTypeValues[
+      'Child Pornography (possession, manufacture, and distribution)'
+    ],
   CHILD_SEX_TRAFFICKING: NCMECIncidentTypeValues['Child Sex Trafficking'],
   CHILD_SEX_TOURISM: NCMECIncidentTypeValues['Child Sex Tourism'],
   CHILD_SEXUAL_MOLESTATION: NCMECIncidentTypeValues['Child Sexual Molestation'],
   MISLEADING_DOMAIN_NAME: NCMECIncidentTypeValues['Misleading Domain Name'],
-  MISLEADING_WORDS_OR_DIGITAL_IMAGES: NCMECIncidentTypeValues['Misleading Words or Digital Images on the Internet'],
-  ONLINE_ENTICEMENT_OF_CHILDREN: NCMECIncidentTypeValues['Online Enticement of Children for Sexual Acts'],
-  UNSOLICITED_OBSCENE_MATERIAL_TO_CHILD: NCMECIncidentTypeValues['Unsolicited Obscene Material Sent to a Child'],
+  MISLEADING_WORDS_OR_DIGITAL_IMAGES:
+    NCMECIncidentTypeValues[
+      'Misleading Words or Digital Images on the Internet'
+    ],
+  ONLINE_ENTICEMENT_OF_CHILDREN:
+    NCMECIncidentTypeValues['Online Enticement of Children for Sexual Acts'],
+  UNSOLICITED_OBSCENE_MATERIAL_TO_CHILD:
+    NCMECIncidentTypeValues['Unsolicited Obscene Material Sent to a Child'],
 };
 
 const resolvers = {

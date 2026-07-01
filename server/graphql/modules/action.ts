@@ -1,16 +1,21 @@
-import { AuthenticationError } from 'apollo-server-express';
+/* eslint-disable max-lines */
+import { type JsonObject } from 'type-fest';
 
+import { parseStoredParameters } from '../../services/moderationConfigService/index.js';
 import { isCoopErrorOfType } from '../../utils/errors.js';
 import { assertUnreachable } from '../../utils/misc.js';
 import {
+  type GQLActionParameter,
   type GQLActionResolvers,
   type GQLCustomActionResolvers,
+  type GQLCustomMrtApiParamSpec,
   type GQLEnqueueAuthorToMrtActionResolvers,
   type GQLEnqueueToMrtActionResolvers,
   type GQLEnqueueToNcmecActionResolvers,
   type GQLMutationResolvers,
   type GQLQueryResolvers,
 } from '../generated.js';
+import { unauthenticatedError } from '../utils/errors.js';
 import { gqlErrorResult, gqlSuccessResult } from '../utils/gqlResult.js';
 
 const typeDefs = /* GraphQL */ `
@@ -22,6 +27,76 @@ const typeDefs = /* GraphQL */ `
     penalty: UserPenaltySeverity!
     applyUserStrikes: Boolean
     itemTypes: [ItemType!]!
+    parameters: [ActionParameter!]!
+    """
+    Configured parameter values for this action in the context of a rule or
+    strike threshold. Null when resolved outside of a rule context.
+    """
+    configuredParameters: JSONObject
+  }
+
+  enum ActionParameterType {
+    STRING
+    NUMBER
+    BOOLEAN
+    SELECT
+    MULTISELECT
+  }
+
+  type ActionParameterOption {
+    value: String!
+    label: String!
+  }
+
+  input ActionParameterOptionInput {
+    value: String!
+    label: String!
+  }
+
+  """
+  Definition of a single runtime parameter on an action. The moderator is
+  prompted for a value at execution time; the value is included in the
+  webhook payload under the parameter's \`name\`.
+  """
+  type ActionParameter {
+    """
+    Key under which the value is sent in the webhook payload.
+    """
+    name: String!
+    displayName: String!
+    description: String
+    type: ActionParameterType!
+    required: Boolean!
+    options: [ActionParameterOption!]
+    """
+    NUMBER only: inclusive minimum.
+    """
+    min: Float
+    """
+    NUMBER only: inclusive maximum.
+    """
+    max: Float
+    """
+    STRING only: inclusive maximum length in characters.
+    """
+    maxLength: Int
+    """
+    Pre-filled value shown to the moderator. Shape matches \`type\`.
+    """
+    defaultValue: JSON
+  }
+
+  input ActionParameterInput {
+    name: String!
+    displayName: String!
+    description: String
+    type: ActionParameterType!
+    required: Boolean!
+    options: [ActionParameterOptionInput!]
+    min: Float
+    max: Float
+    maxLength: Int
+    defaultValue: JSON
   }
 
   type CustomAction implements ActionBase {
@@ -35,7 +110,15 @@ const typeDefs = /* GraphQL */ `
     callbackUrlHeaders: JSONObject
     callbackUrlBody: JSONObject
     applyUserStrikes: Boolean
+    parameters: [ActionParameter!]!
+    configuredParameters: JSONObject
+    """
+    Deprecated alias for \`parameters\` retained for back-compat with the
+    initial MRT-only parameter implementation. New consumers should read
+    \`parameters\` instead.
+    """
     customMrtApiParams: [CustomMrtApiParamSpec]!
+      @deprecated(reason: "Use \`parameters\` instead.")
   }
 
   type CustomMrtApiParamSpec {
@@ -52,6 +135,8 @@ const typeDefs = /* GraphQL */ `
     penalty: UserPenaltySeverity!
     itemTypes: [ItemType!]!
     applyUserStrikes: Boolean
+    parameters: [ActionParameter!]!
+    configuredParameters: JSONObject
   }
 
   type EnqueueToNcmecAction implements ActionBase {
@@ -62,6 +147,8 @@ const typeDefs = /* GraphQL */ `
     penalty: UserPenaltySeverity!
     itemTypes: [ItemType!]!
     applyUserStrikes: Boolean
+    parameters: [ActionParameter!]!
+    configuredParameters: JSONObject
   }
 
   type EnqueueAuthorToMrtAction implements ActionBase {
@@ -72,10 +159,12 @@ const typeDefs = /* GraphQL */ `
     penalty: UserPenaltySeverity!
     itemTypes: [ItemType!]!
     applyUserStrikes: Boolean!
+    parameters: [ActionParameter!]!
+    configuredParameters: JSONObject
   }
 
   union Action =
-      EnqueueToMrtAction
+    | EnqueueToMrtAction
     | EnqueueToNcmecAction
     | CustomAction
     | EnqueueAuthorToMrtAction
@@ -88,6 +177,7 @@ const typeDefs = /* GraphQL */ `
     callbackUrlHeaders: JSONObject
     callbackUrlBody: JSONObject
     applyUserStrikes: Boolean
+    parameters: [ActionParameterInput!]
   }
 
   input UpdateActionInput {
@@ -99,6 +189,10 @@ const typeDefs = /* GraphQL */ `
     callbackUrlHeaders: JSONObject
     callbackUrlBody: JSONObject
     applyUserStrikes: Boolean
+    """
+    Replace the parameter list (\`[]\` clears it). Omit to leave unchanged.
+    """
+    parameters: [ActionParameterInput!]
   }
 
   type ActionNameExistsError implements Error {
@@ -111,7 +205,7 @@ const typeDefs = /* GraphQL */ `
   }
 
   union MutateActionResponse =
-      MutateActionSuccessResponse
+    | MutateActionSuccessResponse
     | ActionNameExistsError
 
   type MutateActionSuccessResponse {
@@ -132,6 +226,19 @@ const typeDefs = /* GraphQL */ `
     actionIds: [String!]!
     itemTypeId: String!
     policyIds: [String!]!
+    """
+    Optional map of \`actionId\` -> \`{ paramName: value }\` carrying
+    moderator-supplied runtime parameter values. Each map is validated against
+    the action's parameter spec server-side before publish; invalid values
+    reject the entire request.
+    """
+    parameters: JSONObject
+    """
+    Optional moderator-authored note explaining why this action was taken.
+    Sent to the action's webhook as \`actorNote\` and persisted to the action
+    execution audit log.
+    """
+    note: String
   }
 
   type ExecuteActionResponse {
@@ -179,11 +286,64 @@ const Action: GQLActionResolvers = {
   },
 };
 
+// Project the loose `JsonValue | null` stored in `actions.custom_mrt_api_params`
+// to the typed `ActionParameter` shape via the service-layer
+// `parseStoredParameters` (single source of truth for the projection rules).
+function projectParameters(value: unknown): GQLActionParameter[] {
+  return parseStoredParameters(value).map((p) => ({
+    name: p.name,
+    displayName: p.displayName,
+    description: p.description ?? null,
+    type: p.type,
+    required: p.required,
+    options: p.options
+      ? p.options.map((o) => ({ value: o.value, label: o.label }))
+      : null,
+    min: p.min ?? null,
+    max: p.max ?? null,
+    maxLength: p.maxLength ?? null,
+    defaultValue:
+      p.defaultValue === undefined
+        ? null
+        : (p.defaultValue as GQLActionParameter['defaultValue']),
+  }));
+}
+
+// `customMrtApiParams` lives only on CustomAction in the service-layer types,
+// but the underlying DB column is shared by every action type. Read it
+// defensively so the GraphQL projection works for all four action types.
+function readRawParameters(parent: unknown): unknown {
+  if (typeof parent !== 'object' || parent === null) return null;
+  return (
+    (parent as { customMrtApiParams?: unknown }).customMrtApiParams ?? null
+  );
+}
+
+// Populated by rule.ts resolvers when the action is resolved in a rule context.
+function readConfiguredParameters(parent: unknown): JsonObject | null {
+  if (typeof parent !== 'object' || parent === null) return null;
+  return (
+    (parent as { configuredParameters?: JsonObject }).configuredParameters ??
+    null
+  );
+}
+
 const CustomAction: GQLCustomActionResolvers = {
+  parameters(parent) {
+    return projectParameters(parent.customMrtApiParams);
+  },
+  configuredParameters(parent) {
+    return readConfiguredParameters(parent);
+  },
+  customMrtApiParams(parent) {
+    return Array.isArray(parent.customMrtApiParams)
+      ? (parent.customMrtApiParams as readonly GQLCustomMrtApiParamSpec[])
+      : [];
+  },
   async itemTypes(action, _, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('User required.');
+      throw unauthenticatedError('User required.');
     }
     return context.services.ModerationConfigService.getItemTypesForAction({
       orgId: user.orgId,
@@ -193,10 +353,16 @@ const CustomAction: GQLCustomActionResolvers = {
 };
 
 const EnqueueAuthorToMrtAction: GQLEnqueueAuthorToMrtActionResolvers = {
+  parameters(parent) {
+    return projectParameters(readRawParameters(parent));
+  },
+  configuredParameters(parent) {
+    return readConfiguredParameters(parent);
+  },
   async itemTypes(action, _, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('User required.');
+      throw unauthenticatedError('User required.');
     }
     return context.services.ModerationConfigService.getItemTypesForAction({
       orgId: user.orgId,
@@ -206,10 +372,16 @@ const EnqueueAuthorToMrtAction: GQLEnqueueAuthorToMrtActionResolvers = {
 };
 
 const EnqueueToMrtAction: GQLEnqueueToMrtActionResolvers = {
+  parameters(parent) {
+    return projectParameters(readRawParameters(parent));
+  },
+  configuredParameters(parent) {
+    return readConfiguredParameters(parent);
+  },
   async itemTypes(action, _, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('User required.');
+      throw unauthenticatedError('User required.');
     }
     return context.services.ModerationConfigService.getItemTypesForAction({
       orgId: user.orgId,
@@ -219,10 +391,16 @@ const EnqueueToMrtAction: GQLEnqueueToMrtActionResolvers = {
 };
 
 const EnqueueToNcmecAction: GQLEnqueueToNcmecActionResolvers = {
+  parameters(parent) {
+    return projectParameters(readRawParameters(parent));
+  },
+  configuredParameters(parent) {
+    return readConfiguredParameters(parent);
+  },
   async itemTypes(action, _, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('User required.');
+      throw unauthenticatedError('User required.');
     }
     return context.services.ModerationConfigService.getItemTypesForAction({
       orgId: user.orgId,
@@ -235,7 +413,7 @@ const Query: GQLQueryResolvers = {
   async action(_, { id }, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('User required.');
+      throw unauthenticatedError('User required.');
     }
 
     return context.dataSources.actionAPI.getGraphQLActionFromId({
@@ -250,7 +428,7 @@ const Mutation: GQLMutationResolvers = {
     try {
       const user = context.getUser();
       if (user == null) {
-        throw new AuthenticationError('User required.');
+        throw unauthenticatedError('User required.');
       }
       const action = await context.dataSources.actionAPI.createAction(
         params.input,
@@ -269,7 +447,7 @@ const Mutation: GQLMutationResolvers = {
     try {
       const user = context.getUser();
       if (user == null) {
-        throw new AuthenticationError('User required.');
+        throw unauthenticatedError('User required.');
       }
       const { orgId } = user;
       const action = await context.dataSources.actionAPI.updateAction(
@@ -288,7 +466,7 @@ const Mutation: GQLMutationResolvers = {
   async deleteAction(_, params, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('User required.');
+      throw unauthenticatedError('User required.');
     }
     const { orgId } = user;
     return context.dataSources.actionAPI.deleteAction(orgId, params.id);
@@ -296,21 +474,28 @@ const Mutation: GQLMutationResolvers = {
   async bulkExecuteActions(_, params, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('User required.');
+      throw unauthenticatedError('User required.');
     }
 
     const { orgId, id, email } = user;
 
     const actionResults =
-      await context.dataSources.actionAPI.bulkExecuteActions(
-        params.input.itemIds,
-        params.input.actionIds,
-        params.input.itemTypeId,
-        params.input.policyIds,
+      await context.dataSources.actionAPI.bulkExecuteActions({
+        itemIds: params.input.itemIds,
+        actionIds: params.input.actionIds,
+        itemTypeId: params.input.itemTypeId,
+        policyIds: params.input.policyIds,
         orgId,
-        id,
-        email,
-      );
+        actorId: id,
+        actorEmail: email,
+        // GraphQL `JSONObject` arrives as a plain object; the datasource
+        // narrows + validates per-action against each spec.
+        actionIdToParameters: (params.input.parameters ?? null) as Record<
+          string,
+          Record<string, unknown>
+        > | null,
+        actorNote: params.input.note ?? null,
+      });
 
     return {
       results: actionResults.flat().map((actionResult) => ({

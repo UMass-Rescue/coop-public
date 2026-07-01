@@ -12,14 +12,17 @@ export default function serveIntegrationLogo(
   _deps: Dependencies,
 ): RequestHandlerWithBodies<Record<string, never>, undefined> {
   return (req, res, next) => {
-    const integrationId = req.params['integrationId'];
+    const rawIntegrationId = req.params['integrationId'];
+    const integrationId =
+      typeof rawIntegrationId === 'string' ? rawIntegrationId : undefined;
     if (!integrationId || integrationId.length === 0) {
       return next(
         makeNotFoundError('Missing integration id.', { shouldErrorSpan: true }),
       );
     }
-    const filePath = getIntegrationRegistry().getPluginLogoFilePath(integrationId);
-    if (filePath === undefined) { // eslint-disable-line @typescript-eslint/no-unnecessary-condition -- runtime guard for missing plugin logo
+    const filePath =
+      getIntegrationRegistry().getPluginLogoFilePath(integrationId);
+    if (filePath === undefined) {
       return next(
         makeNotFoundError('Integration logo not found.', {
           shouldErrorSpan: true,
@@ -28,8 +31,12 @@ export default function serveIntegrationLogo(
     }
     // Path was validated at plugin load (under package root); safe to send.
     res.setHeader('Cache-Control', 'public, max-age=86400');
-    res.sendFile(filePath, (err) => {
-      if (err != null && !res.headersSent) { // eslint-disable-line @typescript-eslint/no-unnecessary-condition -- sendFile callback err is Error | null per types
+    // Public plugin asset; opt out of helmet's strict same-origin CORP default
+    // so the SPA can load it via <img src> when deployed on a different origin
+    // than the API.
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.sendFile(filePath, (err?: Error) => {
+      if (err && !res.headersSent) {
         next(err);
       }
     });

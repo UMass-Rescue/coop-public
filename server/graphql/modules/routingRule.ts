@@ -1,9 +1,4 @@
-import { AuthenticationError } from 'apollo-server-express';
-
-import {
-  hasPermission,
-  UserPermission,
-} from '../../models/types/permissioning.js';
+import { UserPermission } from '../../services/userManagementService/index.js';
 import { isCoopErrorOfType } from '../../utils/errors.js';
 import {
   isNonEmptyArray,
@@ -17,6 +12,7 @@ import {
   type GQLQueryResolvers,
   type GQLRoutingRuleResolvers,
 } from '../generated.js';
+import { forbiddenError, unauthenticatedError } from '../utils/errors.js';
 import { gqlErrorResult, gqlSuccessResult } from '../utils/gqlResult.js';
 
 const typeDefs = /* GraphQL */ `
@@ -95,12 +91,12 @@ const typeDefs = /* GraphQL */ `
   }
 
   union CreateRoutingRuleResponse =
-      MutateRoutingRuleSuccessResponse
+    | MutateRoutingRuleSuccessResponse
     | RoutingRuleNameExistsError
     | QueueDoesNotExistError
 
   union UpdateRoutingRuleResponse =
-      MutateRoutingRuleSuccessResponse
+    | MutateRoutingRuleSuccessResponse
     | RoutingRuleNameExistsError
     | NotFoundError
     | QueueDoesNotExistError
@@ -125,13 +121,12 @@ const RoutingRule: GQLRoutingRuleResolvers = {
   async destinationQueue(routingRule, _, context) {
     const user = context.getUser();
     if (!user || user.orgId !== routingRule.orgId) {
-      throw new AuthenticationError('User required');
+      throw unauthenticatedError('User required');
     }
 
-    const userCanEditMRTQueues = hasPermission(
-      UserPermission.EDIT_MRT_QUEUES,
-      user.role,
-    );
+    const userCanEditMRTQueues = user
+      .getPermissions()
+      .includes(UserPermission.EDIT_MRT_QUEUES);
 
     const queueSelector = {
       orgId: user.orgId,
@@ -155,7 +150,7 @@ const RoutingRule: GQLRoutingRuleResolvers = {
   async itemTypes(routingRule, _, context) {
     const user = context.getUser();
     if (!user || user.orgId !== routingRule.orgId) {
-      throw new AuthenticationError('User required');
+      throw unauthenticatedError('User required');
     }
 
     const itemTypes =
@@ -177,7 +172,12 @@ const Mutation: GQLMutationResolvers = {
     const { itemTypeIds } = params.input;
 
     if (user == null) {
-      throw new AuthenticationError('User required.');
+      throw unauthenticatedError('User required.');
+    }
+    if (!user.getPermissions().includes(UserPermission.MANAGE_ROUTING_RULES)) {
+      throw forbiddenError(
+        'User does not have permission to manage routing rules',
+      );
     }
 
     if (!itemTypeIdsAreValid(itemTypeIds)) {
@@ -216,7 +216,12 @@ const Mutation: GQLMutationResolvers = {
     const user = context.getUser();
     const { itemTypeIds } = params.input;
     if (user == null) {
-      throw new AuthenticationError('User required.');
+      throw unauthenticatedError('User required.');
+    }
+    if (!user.getPermissions().includes(UserPermission.MANAGE_ROUTING_RULES)) {
+      throw forbiddenError(
+        'User does not have permission to manage routing rules',
+      );
     }
 
     if (itemTypeIds && !itemTypeIdsAreValid(itemTypeIds)) {
@@ -261,18 +266,29 @@ const Mutation: GQLMutationResolvers = {
   async deleteRoutingRule(_, params, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('User required.');
+      throw unauthenticatedError('User required.');
+    }
+    if (!user.getPermissions().includes(UserPermission.MANAGE_ROUTING_RULES)) {
+      throw forbiddenError(
+        'User does not have permission to manage routing rules',
+      );
     }
 
     return context.services.ManualReviewToolService.deleteRoutingRule({
       id: params.input.id,
+      orgId: user.orgId,
       isAppealsRule: params.input.isAppealsRule ?? false,
     });
   },
   async reorderRoutingRules(_, params, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('User required.');
+      throw unauthenticatedError('User required.');
+    }
+    if (!user.getPermissions().includes(UserPermission.MANAGE_ROUTING_RULES)) {
+      throw forbiddenError(
+        'User does not have permission to manage routing rules',
+      );
     }
 
     const { order } = params.input;

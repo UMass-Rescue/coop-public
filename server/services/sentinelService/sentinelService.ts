@@ -8,6 +8,8 @@
  * The factory does NOT read process.env directly — the caller passes in the
  * URL, keeping the module testable and DI-friendly.
  */
+import { jsonStringify } from '../../utils/encoding.js';
+import { type FetchHTTP } from '../networkingService/index.js';
 
 export type SentinelScoreRequest = {
   texts: string[];
@@ -75,31 +77,34 @@ export interface SentinelService {
 
 const DEFAULT_BASE_URL = 'http://localhost:8000';
 
-export function makeSentinelService(apiUrl?: string): SentinelService {
+export function makeSentinelService(
+  fetchHTTP: FetchHTTP,
+  apiUrl?: string,
+): SentinelService {
   const baseUrl = (apiUrl ?? DEFAULT_BASE_URL).replace(/\/$/, '');
 
   async function fetchWithError<T>(
     endpoint: string,
-    options: RequestInit = {},
+    options: { method: 'get' | 'post'; body?: string } = { method: 'get' },
   ): Promise<T> {
     try {
-      const response = await fetch(`${baseUrl}${endpoint}`, {
-        ...options,
-        headers: {
-          'Content-Type': 'application/json',
-          ...options.headers,
-        },
+      const response = await fetchHTTP({
+        url: `${baseUrl}${endpoint}`,
+        method: options.method,
+        headers: { 'Content-Type': 'application/json' },
+        body: options.body,
+        handleResponseBody: 'as-json',
+        timeoutMs: 10_000,
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
         throw new SentinelServiceError(
-          `Sentinel API error: ${errorText}`,
+          `Sentinel API error: ${jsonStringify(response.body)}`,
           response.status,
         );
       }
 
-      return response.json() as Promise<T>;
+      return response.body as T;
     } catch (error) {
       if (error instanceof SentinelServiceError) {
         throw error;
@@ -113,10 +118,12 @@ export function makeSentinelService(apiUrl?: string): SentinelService {
   }
 
   return {
-    async scoreTexts(request: SentinelScoreRequest): Promise<SentinelScoreResponse> {
+    async scoreTexts(
+      request: SentinelScoreRequest,
+    ): Promise<SentinelScoreResponse> {
       return fetchWithError<SentinelScoreResponse>('/score', {
-        method: 'POST',
-        body: JSON.stringify({
+        method: 'post',
+        body: jsonStringify({
           texts: request.texts,
           top_k: request.top_k ?? 5,
           min_score_to_consider: request.min_score_to_consider ?? 0.0,
@@ -132,26 +139,26 @@ export function makeSentinelService(apiUrl?: string): SentinelService {
 
     async getBanksStatus(): Promise<SentinelBanksStatus> {
       return fetchWithError<SentinelBanksStatus>('/banks/status', {
-        method: 'GET',
+        method: 'get',
       });
     },
 
     async healthCheck(): Promise<SentinelHealthResponse> {
       return fetchWithError<SentinelHealthResponse>('/health', {
-        method: 'GET',
+        method: 'get',
       });
     },
 
     async loadBanks(request: SentinelLoadBanksRequest): Promise<void> {
       await fetchWithError<void>('/banks/load', {
-        method: 'POST',
-        body: JSON.stringify(request),
+        method: 'post',
+        body: jsonStringify(request),
       });
     },
 
     async unloadBanks(): Promise<void> {
       await fetchWithError<void>('/banks/unload', {
-        method: 'POST',
+        method: 'post',
       });
     },
   };

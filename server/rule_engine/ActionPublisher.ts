@@ -1,10 +1,17 @@
 /* eslint-disable max-lines */
 import { type Exception } from '@opentelemetry/api';
-import { type ItemIdentifier } from '@roostorg/types';
+import { type ItemIdentifier } from '@roostorg/coop-types';
 import { type JsonObject, type ReadonlyDeep } from 'type-fest';
 
 import { type Dependencies } from '../iocContainer/index.js';
 import { inject } from '../iocContainer/utils.js';
+import {
+  type ActionExecutionCorrelationId,
+  type ActionExecutionSourceType,
+  type MatchingRule,
+  type Policy,
+} from '../services/analyticsLoggers/index.js';
+import { makeSyntheticUserSubmission } from '../services/itemInvestigationService/index.js';
 import {
   getFieldValueForRole,
   itemSubmissionToItemSubmissionWithTypeIdentifier,
@@ -15,12 +22,6 @@ import {
   type Action,
   type ItemType,
 } from '../services/moderationConfigService/index.js';
-import {
-  type ActionExecutionCorrelationId,
-  type ActionExecutionSourceType,
-  type MatchingRule,
-  type Policy,
-} from '../services/analyticsLoggers/index.js';
 import { asyncIterableToArray } from '../utils/collections.js';
 import { getSourceType, type CorrelationId } from '../utils/correlationIds.js';
 import { jsonStringify } from '../utils/encoding.js';
@@ -56,6 +57,15 @@ export type ActionExecutionData<
   actorId?: string;
   reportedItems?: ItemIdentifier[];
   jobId?: string;
+  /**
+   * Validated moderator-supplied runtime parameter values for this action,
+   * propagated into the audit log alongside the action itself. Persisted as
+   * JSON in `analytics.ACTION_EXECUTIONS.parameters` so reviewers can see
+   * exactly what the action ran with.
+   */
+  parameterValues?: Record<string, unknown>;
+  /** Optional moderator note. Persisted in `analytics.ACTION_EXECUTIONS.actor_note`. */
+  actorNote?: string;
 };
 
 export type ActionResult<T extends ActionTargetItem> = {
@@ -68,8 +78,8 @@ export function getUserFromActionTarget(it: ActionTargetItem) {
   return it.itemType.kind === 'USER'
     ? { id: it.itemId, typeId: it.itemType.id }
     : isFullSubmission(it)
-    ? it.creator
-    : undefined;
+      ? it.creator
+      : undefined;
 }
 
 /**
@@ -91,8 +101,8 @@ export function getUserFromActionTargetItem(it: ActionTargetItem) {
   return it.itemType.kind === 'USER'
     ? { id: it.itemId, typeId: it.itemType.id }
     : isFullSubmission(it)
-    ? it.creator
-    : undefined;
+      ? it.creator
+      : undefined;
 }
 
 /**
@@ -112,6 +122,7 @@ class ActionPublisher {
     private ncmecService: Dependencies['NcmecService'],
     private itemInvestigationService: Dependencies['ItemInvestigationService'],
     private userStrikeService: Dependencies['UserStrikeService'],
+    private getItemTypeEventuallyConsistent: Dependencies['getItemTypeEventuallyConsistent'],
   ) {}
 
   /**
@@ -144,10 +155,39 @@ class ActionPublisher {
       actorId?: string;
       actorEmail?: string;
       decisionReason?: string;
+      /**
+       * Optional moderator-authored note explaining why the action(s) ran.
+       * Forwarded to CUSTOM_ACTION webhooks as `actorNote` and persisted by
+       * the audit logger (PR 3).
+       */
+      actorNote?: string;
     },
   ): Promise<ActionResult<U>[]> {
-    const { orgId, correlationId, targetItem, sync, actorId, actorEmail } =
-      executionContext;
+    const {
+      orgId,
+      correlationId,
+      targetItem,
+      sync,
+      actorId,
+      actorEmail,
+      actorNote,
+      decisionReason,
+    } = executionContext;
+
+    // Resolve the action user once and reuse it for both `creator` and the
+    // strike total. Only needed when a CUSTOM_ACTION webhook will carry them.
+    const hasWebhook = triggeredActions.some(
+      (it) => it.action.actionType === ActionType.CUSTOM_ACTION,
+    );
+    const { user: actionUser, isDirect: isDirectUser } = hasWebhook
+      ? await this.resolveActionUser(orgId, targetItem)
+      : { user: undefined, isDirect: false };
+    const userStrikeCount = await this.getUserStrikeCountForWebhook(
+      orgId,
+      actionUser,
+      isDirectUser,
+      triggeredActions,
+    );
 
     // Apply user strikes from the actions that were triggered.
     // we do this without awaiting to not block the action publishing
@@ -211,6 +251,10 @@ class ActionPublisher {
                 reportedItems,
                 relatedRules,
                 customMrtApiParamDecisionPayload,
+                actorNote,
+                decisionReason,
+                userStrikeCount,
+                actionUser,
               );
             },
           );
@@ -229,13 +273,23 @@ class ActionPublisher {
                 matchingRules,
                 ruleEnvironment,
                 policies: policies.map((policy) =>
-                  safePick(policy, ['id', 'name', 'userStrikeCount', 'penalty']),
+                  safePick(policy, [
+                    'id',
+                    'name',
+                    'userStrikeCount',
+                    'penalty',
+                  ]),
                 ),
                 orgId,
                 targetItem,
                 correlationId,
                 actorId,
                 jobId,
+                // Audit-trail context: persist what the moderator supplied
+                // alongside the action itself so reviewers can see why and
+                // with what values it ran (PR 3 for #377).
+                parameterValues: customMrtApiParamDecisionPayload,
+                actorNote,
               },
             ],
             failed: success === false,
@@ -250,6 +304,80 @@ class ActionPublisher {
         },
       ),
     ]);
+  }
+
+  /**
+   * Resolves the user a webhook action concerns, once per batch. `isDirect` is
+   * true when the target resolves the way the strike service resolves it (USER
+   * target or a full submission's creator); for identifier-only CONTENT we fall
+   * back to fetching the latest submission's creator (`isDirect` false).
+   * Best-effort: a failed fetch yields no user rather than throwing.
+   */
+  private async resolveActionUser(
+    orgId: string,
+    targetItem: ActionTargetItem,
+  ): Promise<{ user: ItemIdentifier | undefined; isDirect: boolean }> {
+    const directUser = getUserFromActionTargetItem(targetItem);
+    if (directUser) {
+      return { user: directUser, isDirect: true };
+    }
+    if (targetItem.itemType.kind !== 'CONTENT') {
+      return { user: undefined, isDirect: false };
+    }
+    if (isFullSubmission(targetItem)) {
+      return { user: targetItem.creator, isDirect: false };
+    }
+    try {
+      const submission = (
+        await this.itemInvestigationService.getItemByIdentifier({
+          orgId,
+          itemIdentifier: {
+            id: targetItem.itemId,
+            typeId: targetItem.itemType.id,
+          },
+          latestSubmissionOnly: true,
+        })
+      )?.latestSubmission;
+      return { user: submission?.creator, isDirect: false };
+    } catch {
+      return { user: undefined, isDirect: false };
+    }
+  }
+
+  /**
+   * The user's cumulative strike total after this event (current total + strikes
+   * this event applies), for CUSTOM_ACTION webhooks. The applied delta is only
+   * added when the user resolved directly (`isDirect`) — i.e. when the strike
+   * service actually applies a strike. Best-effort; undefined when unresolvable.
+   */
+  private async getUserStrikeCountForWebhook<
+    T extends ActionExecutionCorrelationId,
+  >(
+    orgId: string,
+    user: ItemIdentifier | undefined,
+    isDirect: boolean,
+    triggeredActions: Omit<
+      Omit<ActionExecutionData<T>, 'action'> & { action: Action },
+      'orgId' | 'correlationId' | 'targetItem'
+    >[],
+  ): Promise<number | undefined> {
+    if (!user) {
+      return undefined;
+    }
+    try {
+      const currentTotal = await this.userStrikeService.getUserStrikeValue(
+        orgId,
+        user,
+      );
+      const appliedStrikes = isDirect
+        ? (this.userStrikeService.findMostSeverePolicyViolationFromActions(
+            triggeredActions,
+          )?.userStrikeCount ?? 0)
+        : 0;
+      return currentTotal + appliedStrikes;
+    } catch {
+      return undefined;
+    }
   }
 
   async publishAction(
@@ -267,6 +395,10 @@ class ActionPublisher {
       string,
       string | boolean | unknown
     >,
+    actorNote?: string,
+    decisionReason?: string,
+    userStrikeCount?: number,
+    creator?: ItemIdentifier,
   ): Promise<boolean> {
     return this.tracer.addActiveSpan(
       { resource: 'actionPublisher', operation: 'publishAction' },
@@ -291,6 +423,50 @@ class ActionPublisher {
             })
           )?.latestSubmission;
         };
+
+        // USER target with no record: synthesize a minimal submission from
+        // the id. Returns undefined for non-USER targets — MRT needs the
+        // real content submission, so it must fail loudly for CONTENT.
+        const getFullItemOrSyntheticUserForUserTarget = async () => {
+          const fullItem = await getFullItem();
+          if (fullItem) {
+            return fullItem;
+          }
+          if (targetItem.itemType.kind !== 'USER') {
+            return undefined;
+          }
+          const userItemType = await this.getItemTypeEventuallyConsistent({
+            orgId,
+            typeSelector: { id: targetItem.itemType.id },
+          });
+          if (!userItemType || userItemType.kind !== 'USER') {
+            return undefined;
+          }
+          return makeSyntheticUserSubmission(targetItem.itemId, userItemType);
+        };
+
+        // NCMEC fallback: USER target → synthetic user (as above); CONTENT
+        // target → resolve the creator via ACTION_EXECUTIONS and synthesize a
+        // user submission keyed on the creator id. THREAD has no single
+        // owner, so we refuse.
+        const getFullItemOrSyntheticUserForNcmec = async () => {
+          const userTarget = await getFullItemOrSyntheticUserForUserTarget();
+          if (userTarget) {
+            return userTarget;
+          }
+          if (targetItem.itemType.kind !== 'CONTENT') {
+            return undefined;
+          }
+          const inferred =
+            await this.itemInvestigationService.synthesizeUserItemFromContentTarget(
+              {
+                orgId,
+                itemId: targetItem.itemId,
+                itemTypeId: targetItem.itemType.id,
+              },
+            );
+          return inferred?.latestSubmission;
+        };
         const actionSource = getSourceType(
           correlationId,
         ) as ActionExecutionSourceType;
@@ -305,7 +481,6 @@ class ActionPublisher {
                 ...customMrtApiParamDecisionPayload,
               };
 
-
               const body = {
                 item: {
                   id: targetItem.itemId,
@@ -317,6 +492,17 @@ class ActionPublisher {
                 action: { id: action.id },
                 custom: customBodyWithMrtParams,
                 actorEmail,
+                // Top-level (not nested under `custom`) so the moderator note
+                // can't collide with a user-defined parameter named
+                // `actorNote`. Omitted from the body entirely when absent.
+                ...(actorNote !== undefined ? { actorNote } : {}),
+                ...(creator !== undefined ? { creator } : {}),
+                // The moderator's decision reason, top-level for the same
+                // collision-safety reason as `actorNote`. Omitted when absent.
+                ...(decisionReason !== undefined ? { decisionReason } : {}),
+                // The user's cumulative strike total after this event. Omitted
+                // when there's no resolvable user.
+                ...(userStrikeCount !== undefined ? { userStrikeCount } : {}),
               };
 
               const response = await this.fetchHTTP({
@@ -329,7 +515,7 @@ class ActionPublisher {
                   // could provide that would have security implications when blindly fed
                   // in here -- like something that would somehow lead fetch to do something
                   // unexpected.
-                  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+
                   ...((customHeaders as JsonObject | undefined) ?? undefined),
                   // Put this header last so customHeaders can't override it, which I
                   // think makes sense, since there's no way for users to effect the
@@ -352,11 +538,14 @@ class ActionPublisher {
               }
 
               return true;
-            case ActionType.ENQUEUE_TO_MRT:
-              const fullItemForMrt = await getFullItem();
+            case ActionType.ENQUEUE_TO_MRT: {
+              const fullItemForMrt =
+                await getFullItemOrSyntheticUserForUserTarget();
               if (!fullItemForMrt) {
                 throw new Error(
-                  "Actions without full item submissions can't be enqueued to MRT yet",
+                  `Cannot enqueue to MRT: no submission record for ${targetItem.itemType.kind} ` +
+                    `item ${targetItem.itemId} (type ${targetItem.itemType.id}). ` +
+                    `POST the item to the items endpoint first.`,
                 );
               }
 
@@ -393,11 +582,15 @@ class ActionPublisher {
               });
 
               return true;
-            case ActionType.ENQUEUE_TO_NCMEC:
-              const fullItemForNcmec = await getFullItem();
+            }
+            case ActionType.ENQUEUE_TO_NCMEC: {
+              const fullItemForNcmec =
+                await getFullItemOrSyntheticUserForNcmec();
               if (!fullItemForNcmec) {
                 throw new Error(
-                  "Actions without full item submissions can't be enqueued to NCMEC yet",
+                  `Cannot enqueue to NCMEC: no submission record for ${targetItem.itemType.kind} ` +
+                    `item ${targetItem.itemId} (type ${targetItem.itemType.id}). ` +
+                    `POST the item to the items endpoint first.`,
                 );
               }
 
@@ -426,6 +619,7 @@ class ActionPublisher {
               });
 
               return true;
+            }
             case ActionType.ENQUEUE_AUTHOR_TO_MRT:
               const fullItemForAuthor = await getFullItem();
               if (
@@ -536,6 +730,23 @@ class ActionPublisher {
           }
         } catch (e) {
           span.recordException(e as Exception);
+          // Log to stderr so operators see action failures without having
+          // to pull traces. Identifiers only, no item `data`.
+          // eslint-disable-next-line no-console
+          console.error(
+            jsonStringify({
+              event: 'actionPublisher.publishAction.failed',
+              orgId,
+              actionId: action.id,
+              actionName: action.name,
+              actionType: action.actionType,
+              itemId: targetItem.itemId,
+              itemTypeId: targetItem.itemType.id,
+              itemTypeKind: targetItem.itemType.kind,
+              correlationId,
+              error: e instanceof Error ? e.message : String(e),
+            }),
+          );
           return false;
         }
       },
@@ -553,7 +764,8 @@ export default inject(
     'NcmecService',
     'ItemInvestigationService',
     'UserStrikeService',
+    'getItemTypeEventuallyConsistent',
   ],
   ActionPublisher,
 );
-export { type ActionPublisher };
+export { ActionPublisher };

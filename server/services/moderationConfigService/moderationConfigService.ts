@@ -1,19 +1,12 @@
-/* eslint-disable max-lines */
-import { type ConsumerDirectives } from '../../lib/cache/index.js';
 import { type Kysely } from 'kysely';
 import _ from 'lodash';
 import { type JsonObject, type ReadonlyDeep } from 'type-fest';
 
-// eslint-disable-next-line import/no-restricted-paths
-import type { Invoker } from '../../models/types/permissioning.js';
-import {
-  CoopError,
-  ErrorType,
-  type ErrorInstanceData,
-} from '../../utils/errors.js';
-import { __throw } from '../../utils/misc.js';
+import { type ConsumerDirectives } from '../../lib/cache/index.js';
+import type { Invoker } from '../userManagementService/index.js';
 import { type ModerationConfigServicePg } from './dbTypes.js';
-import { type Action, type Policy } from './index.js';
+import { type LocationBankErrorType, type RuleErrorType } from './errors.js';
+import { type Action, type CustomAction, type Policy } from './index.js';
 import ActionOperations, {
   type ActionErrorType,
 } from './modules/ActionOperations.js';
@@ -24,6 +17,7 @@ import MatchingBankOperations, {
 import PolicyOperations, {
   type PolicyErrorType,
 } from './modules/PolicyOperations.js';
+import RuleReadOperations from './modules/RuleReadOperations.js';
 import UserStrikeOperations, {
   type UserStrikeThresholdErrorType,
 } from './modules/UserStrikeOperations.js';
@@ -37,6 +31,7 @@ import {
   type UserItemType,
 } from './types/itemTypes.js';
 import type { PolicyType } from './types/policies.js';
+import { type PlainRuleWithLatestVersion } from './types/rules.js';
 
 export type ModerationConfigErrorType =
   | 'AttemptingToDeleteDefaultUserType'
@@ -64,6 +59,27 @@ type ArrayOrPromiseOf<T> =
   | Promise<readonly ReadonlyDeep<T>[]>
   | Promise<ReadonlyDeep<T>>;
 
+type ContentTypeSchemaFieldRoles = {
+  creatorId?: string | null;
+  threadId?: string | null;
+  parentId?: string | null;
+  createdAt?: string | null;
+  displayName?: string | null;
+};
+
+type ThreadTypeSchemaFieldRoles = {
+  createdAt?: string | null;
+  displayName?: string | null;
+  creatorId?: string | null;
+};
+
+type UserTypeSchemaFieldRoles = {
+  profileIcon?: string | null;
+  backgroundImage?: string | null;
+  createdAt?: string | null;
+  displayName?: string | null;
+};
+
 /**
  * This service will eventually manage all CRUD operations on entities that are
  * part of an organization's defined moderation policy, including: rules,
@@ -80,6 +96,7 @@ export class ModerationConfigService implements ReturnsModerationConfigTypes {
   private readonly itemTypeOps: ItemTypeOperations;
   private readonly userStrikeOps: UserStrikeOperations;
   private readonly matchingBankOps: MatchingBankOperations;
+  private readonly ruleReadOps: RuleReadOperations;
 
   constructor(
     pgQuery: Kysely<ModerationConfigServicePg>,
@@ -96,9 +113,9 @@ export class ModerationConfigService implements ReturnsModerationConfigTypes {
       onDeletePolicyId,
     );
     this.itemTypeOps = new ItemTypeOperations(pgQuery, pgQueryReplica);
-    // TODO: Remove Rule API and replace with kysely
     this.userStrikeOps = new UserStrikeOperations(pgQuery, pgQueryReplica);
     this.matchingBankOps = new MatchingBankOperations(pgQuery, pgQueryReplica);
+    this.ruleReadOps = new RuleReadOperations(pgQuery, pgQueryReplica);
   }
 
   async getItemTypes(opts: {
@@ -141,13 +158,7 @@ export class ModerationConfigService implements ReturnsModerationConfigTypes {
       name: string;
       schema: ItemSchema;
       description?: string | null;
-      schemaFieldRoles: {
-        creatorId?: string | null;
-        threadId?: string | null;
-        parentId?: string | null;
-        createdAt?: string | null;
-        displayName?: string | null;
-      };
+      schemaFieldRoles: ContentTypeSchemaFieldRoles;
     },
   ): Promise<ReadonlyDeep<ContentItemType>> {
     return this.itemTypeOps.createContentType(orgId, input);
@@ -160,13 +171,7 @@ export class ModerationConfigService implements ReturnsModerationConfigTypes {
       name?: string;
       schema?: ItemSchema;
       description?: string | null;
-      schemaFieldRoles: {
-        creatorId?: string | null;
-        threadId?: string | null;
-        parentId?: string | null;
-        createdAt?: string | null;
-        displayName?: string | null;
-      };
+      schemaFieldRoles: ContentTypeSchemaFieldRoles;
     },
   ): Promise<ReadonlyDeep<ContentItemType>> {
     return this.itemTypeOps.updateContentType(orgId, input);
@@ -178,11 +183,7 @@ export class ModerationConfigService implements ReturnsModerationConfigTypes {
       name: string;
       schema: ItemSchema;
       description?: string | null;
-      schemaFieldRoles: {
-        createdAt?: string | null;
-        displayName?: string | null;
-        creatorId?: string | null;
-      };
+      schemaFieldRoles: ThreadTypeSchemaFieldRoles;
     },
   ): Promise<ReadonlyDeep<ThreadItemType>> {
     return this.itemTypeOps.createThreadType(orgId, input);
@@ -195,11 +196,7 @@ export class ModerationConfigService implements ReturnsModerationConfigTypes {
       name?: string;
       schema?: ItemSchema;
       description?: string | null;
-      schemaFieldRoles: {
-        createdAt?: string | null;
-        displayName?: string | null;
-        creatorId?: string | null;
-      };
+      schemaFieldRoles: ThreadTypeSchemaFieldRoles;
     },
   ): Promise<ReadonlyDeep<ThreadItemType>> {
     return this.itemTypeOps.updateThreadType(orgId, input);
@@ -211,12 +208,7 @@ export class ModerationConfigService implements ReturnsModerationConfigTypes {
       name: string;
       schema: ItemSchema;
       description?: string | null;
-      schemaFieldRoles: {
-        profileIcon?: string | null;
-        backgroundImage?: string | null;
-        createdAt?: string | null;
-        displayName?: string | null;
-      };
+      schemaFieldRoles: UserTypeSchemaFieldRoles;
     },
   ): Promise<ReadonlyDeep<UserItemType>> {
     return this.itemTypeOps.createUserType(orgId, input);
@@ -229,12 +221,7 @@ export class ModerationConfigService implements ReturnsModerationConfigTypes {
       name?: string;
       schema?: ItemSchema;
       description?: string | null;
-      schemaFieldRoles: {
-        profileIcon?: string | null;
-        backgroundImage?: string | null;
-        createdAt?: string | null;
-        displayName?: string | null;
-      };
+      schemaFieldRoles: UserTypeSchemaFieldRoles;
     },
   ): Promise<ReadonlyDeep<UserItemType>> {
     return this.itemTypeOps.updateUserType(orgId, input);
@@ -260,23 +247,28 @@ export class ModerationConfigService implements ReturnsModerationConfigTypes {
     return this.itemTypeOps.getItemTypesForRule(opts);
   }
 
+  // TODO: support other action types? Need to figure out the relationship
+  // between activating various org settings (e.g., enabling MRT or NCMEC
+  // reporting) and this moderationConfigService.
   async createAction(
     orgId: string,
-    input: {
-      name: string;
-      description: string | null;
-      // TODO: support other types? Need to figure out relationship between
-      // activating various org settings (e.g., to enable MRT or NCMEC reporting)
-      // and this moderationConfigService.
-      type: 'CUSTOM_ACTION';
-      callbackUrl: string;
-      callbackUrlHeaders: JsonObject | null;
-      callbackUrlBody: JsonObject | null;
-      // TODO: linking specific item types not yet supported.
-      applyUserStrikes?: boolean;
-    },
-  ) {
+    input: Parameters<ActionOperations['createAction']>[1],
+  ): Promise<CustomAction> {
     return this.actionOps.createAction(orgId, input);
+  }
+
+  async updateCustomAction(
+    orgId: string,
+    opts: Omit<Parameters<ActionOperations['updateCustomAction']>[0], 'orgId'>,
+  ): Promise<CustomAction> {
+    return this.actionOps.updateCustomAction({ orgId, ...opts });
+  }
+
+  async deleteCustomAction(opts: { orgId: string; actionId: string }) {
+    return this.actionOps.deleteCustomAction(opts);
+  }
+  async upsertBuiltInActions(orgId: string) {
+    return this.actionOps.upsertBuiltInActions(orgId);
   }
 
   async getActions(opts: {
@@ -287,8 +279,63 @@ export class ModerationConfigService implements ReturnsModerationConfigTypes {
     return this.actionOps.getActions(opts);
   }
 
+  async getActionsForItemType(opts: {
+    orgId: string;
+    itemTypeId: string;
+    itemTypeKind: ItemTypeKind;
+    readFromReplica?: boolean;
+  }) {
+    return this.actionOps.getActionsForItemType(opts);
+  }
+
+  async getActionsForRuleId(opts: {
+    orgId: string;
+    ruleId: string;
+    readFromReplica?: boolean;
+  }) {
+    return this.actionOps.getActionsForRuleId(opts);
+  }
+
+  async getPoliciesByRuleIds(ruleIds: readonly string[]) {
+    return this.policyOps.getPoliciesByRuleIds({
+      ruleIds,
+      readFromReplica: true,
+    });
+  }
+
+  async getEnabledRulesForItemType(itemTypeId: string) {
+    return this.ruleReadOps.getEnabledRulesForItemType(itemTypeId);
+  }
+
+  async getRuleByIdAndOrg(
+    ruleId: string,
+    orgId: string,
+    opts?: { readFromReplica?: boolean },
+  ): Promise<PlainRuleWithLatestVersion | null> {
+    return this.ruleReadOps.getRuleByIdAndOrg(ruleId, orgId, opts);
+  }
+
+  async getRulesForOrg(
+    orgId: string,
+    opts?: { readFromReplica?: boolean },
+  ): Promise<readonly PlainRuleWithLatestVersion[]> {
+    return this.ruleReadOps.getRulesForOrg(orgId, opts);
+  }
+
+  async findEnabledUserRules(): Promise<PlainRuleWithLatestVersion[]> {
+    return this.ruleReadOps.findEnabledUserRules();
+  }
+
   async getPolicies(opts: { orgId: string; readFromReplica?: boolean }) {
     return this.policyOps.getPolicies(opts);
+  }
+
+  async getPoliciesByIds(opts: {
+    orgId: string;
+    ids: readonly string[];
+    readFromReplica?: boolean;
+  }) {
+    return this.policyOps.getPoliciesByIds(opts);
   }
 
   async getPolicy(opts: {
@@ -350,6 +397,7 @@ export class ModerationConfigService implements ReturnsModerationConfigTypes {
     thresholdSettings: {
       threshold: number;
       actions: string[];
+      actionParameters?: JsonObject;
     };
   }) {
     return this.userStrikeOps.createUserStrikeThreshold(opts);
@@ -360,6 +408,7 @@ export class ModerationConfigService implements ReturnsModerationConfigTypes {
     thresholds: readonly {
       threshold: number;
       actions: readonly string[];
+      actionParameters?: JsonObject;
     }[];
   }) {
     return this.userStrikeOps.setAllUserStrikeThresholds(opts);
@@ -367,7 +416,12 @@ export class ModerationConfigService implements ReturnsModerationConfigTypes {
 
   async updateUserStrikeThreshold(opts: {
     orgId: string;
-    thresholdSettings: { id: string; threshold?: number; actions?: string[] };
+    thresholdSettings: {
+      id: string;
+      threshold?: number;
+      actions?: string[];
+      actionParameters?: JsonObject;
+    };
   }) {
     return this.userStrikeOps.updateUserStrikeThreshold(opts);
   }
@@ -430,51 +484,3 @@ export class ModerationConfigService implements ReturnsModerationConfigTypes {
     await this.itemTypeOps.close();
   }
 }
-
-type RuleErrorType =
-  | 'RuleNameExistsError'
-  | 'RuleHasRunningBacktestsError'
-  | 'RuleIsMissingContentTypeError';
-
-// TODO: throw this error as appropriate on failed rule creation/update.
-export const makeRuleNameExistsError = (data: ErrorInstanceData) =>
-  new CoopError({
-    status: 409,
-    type: [ErrorType.UniqueViolation],
-    title: 'A rule with that name already exists in this organization.',
-    name: 'RuleNameExistsError',
-    ...data,
-  });
-
-// TODO: throw this error as appropriate on failed rule creation/update.
-export const makeRuleIsMissingContentTypeError = (data: ErrorInstanceData) =>
-  new CoopError({
-    status: 400,
-    type: [ErrorType.InvalidUserInput],
-    title: 'This rule must contain a content type on which to operate.',
-    name: 'RuleIsMissingContentTypeError',
-    ...data,
-  });
-
-// TODO: throw this error as appropriate on failed rule creation/update.
-export const makeRuleHasRunningBacktestsError = (data: ErrorInstanceData) =>
-  new CoopError({
-    status: 409,
-    type: [ErrorType.AttemptingToMutateActiveRule],
-    title:
-      "This rule cannot be updated while it has running backtests, which are using the rule's current conditions.",
-    name: 'RuleHasRunningBacktestsError',
-    ...data,
-  });
-
-type LocationBankErrorType = 'LocationBankNameExistsError';
-
-// TODO: throw this error as appropriate on failed bank creation/update.
-export const makeLocationBankNameExistsError = (data: ErrorInstanceData) =>
-  new CoopError({
-    status: 409,
-    type: [ErrorType.UniqueViolation],
-    title: 'A location bank with this name already exists',
-    name: 'LocationBankNameExistsError',
-    ...data,
-  });

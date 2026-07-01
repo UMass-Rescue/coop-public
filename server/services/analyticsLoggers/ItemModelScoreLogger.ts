@@ -24,8 +24,8 @@ export type ItemModelScoreLogEntry<HasFailure extends boolean> = {
   failureReason: HasFailure extends true
     ? string
     : HasFailure extends false
-    ? undefined
-    : string | undefined;
+      ? undefined
+      : string | undefined;
   model: HasFailure extends true
     ? undefined
     : {
@@ -77,7 +77,7 @@ class ItemModelScoreLogger {
                 model_score: data.model.score,
               }
             : {}),
-          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+
           ...(failureReason != null
             ? {
                 event: 'REQUEST_FAILED' as const,

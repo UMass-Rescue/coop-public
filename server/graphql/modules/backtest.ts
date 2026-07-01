@@ -1,13 +1,9 @@
-import { AuthenticationError, ForbiddenError } from 'apollo-server-express';
-
-import { type Backtest } from '../../models/rules/BacktestModel.js';
-import {
-  hasPermission,
-  UserPermission,
-} from '../../models/types/permissioning.js';
+import { UserPermission } from '../../services/userManagementService/index.js';
 import { type RuleExecutionResult } from '../datasources/RuleApi.js';
+import { type GraphQLBacktestParent } from '../datasources/ruleKyselyPersistence.js';
 import { type GQLMutationCreateBacktestArgs } from '../generated.js';
 import { type Context } from '../resolvers.js';
+import { forbiddenError, unauthenticatedError } from '../utils/errors.js';
 import {
   makeConnectionResolver,
   type ConnectionArguments,
@@ -78,14 +74,14 @@ const typeDefs = /* GraphQL */ `
 
 const resolvers = {
   Backtest: {
-    contentItemsProcessed(source: Backtest) {
+    contentItemsProcessed(source: GraphQLBacktestParent) {
       return source.correctedContentItemsProcessed;
     },
-    contentItemsMatched(source: Backtest) {
+    contentItemsMatched(source: GraphQLBacktestParent) {
       return source.correctedContentItemsMatched;
     },
     results: makeConnectionResolver<
-      Backtest,
+      GraphQLBacktestParent,
       { ts: number },
       RuleExecutionResult,
       Context,
@@ -114,16 +110,20 @@ const resolvers = {
       // TODO: figure out an architecture/patterns for permission checks
       // and this type of validation. Make our error handling consistent.
       const user = context.getUser();
-      const rule = await context.services.Sequelize.Rule.findByPk(
-        params.input.ruleId,
-      );
-
       if (user == null) {
-        throw new AuthenticationError('Authenticated user required');
-      } else if (!hasPermission(UserPermission.RUN_BACKTEST, user.role)) {
-        throw new ForbiddenError('User not authorized to create backtests.');
-      } else if (!rule || user.orgId !== rule.orgId) {
-        throw new ForbiddenError('Invalid rule.');
+        throw unauthenticatedError('Authenticated user required');
+      }
+      if (!user.getPermissions().includes(UserPermission.RUN_BACKTEST)) {
+        throw forbiddenError('User not authorized to create backtests.');
+      }
+
+      const rule =
+        await context.services.ModerationConfigService.getRuleByIdAndOrg(
+          params.input.ruleId,
+          user.orgId,
+        );
+      if (rule == null) {
+        throw forbiddenError('Invalid rule.');
       }
 
       return {

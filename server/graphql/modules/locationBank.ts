@@ -1,12 +1,11 @@
-import { AuthenticationError } from 'apollo-server-express';
-
-import { type LocationBank as TLocationBank } from '../../models/banks/LocationBankModel.js';
 import { isCoopErrorOfType } from '../../utils/errors.js';
+import { type LocationBankWithoutFullPlacesAPIResponse } from '../datasources/LocationBankApi.js';
 import {
   type GQLMutationResolvers,
   type GQLQueryResolvers,
 } from '../generated.js';
 import { type ResolverMap } from '../resolvers.js';
+import { unauthenticatedError } from '../utils/errors.js';
 import { gqlErrorResult, gqlSuccessResult } from '../utils/gqlResult.js';
 
 const typeDefs = /* GraphQL */ `
@@ -34,7 +33,7 @@ const typeDefs = /* GraphQL */ `
   }
 
   union MutateLocationBankResponse =
-      MutateLocationBankSuccessResponse
+    | MutateLocationBankSuccessResponse
     | LocationBankNameExistsError
 
   type MutateLocationBankSuccessResponse {
@@ -122,7 +121,7 @@ const typeDefs = /* GraphQL */ `
   }
 `;
 
-const LocationBank: ResolverMap<TLocationBank> = {
+const LocationBank: ResolverMap<LocationBankWithoutFullPlacesAPIResponse> = {
   async locations(locationBank, _, __) {
     return locationBank.getLocations();
   },
@@ -132,7 +131,7 @@ const Query: GQLQueryResolvers = {
   async locationBank(_, { id }, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
     }
 
     return context.dataSources.locationBankAPI.getGraphQLLocationBankFromId({
@@ -147,7 +146,7 @@ const Mutation: GQLMutationResolvers = {
     try {
       const user = context.getUser();
       if (user == null) {
-        throw new AuthenticationError('User required.');
+        throw unauthenticatedError('User required.');
       }
 
       const bank = await context.dataSources.locationBankAPI.createLocationBank(
@@ -170,10 +169,10 @@ const Mutation: GQLMutationResolvers = {
     try {
       const user = context.getUser();
       if (user == null) {
-        throw new AuthenticationError('User required.');
+        throw unauthenticatedError('User required.');
       }
 
-      const bank = context.dataSources.locationBankAPI.updateLocationBank(
+      const bank = await context.dataSources.locationBankAPI.updateLocationBank(
         params.input,
         user.orgId,
       );
@@ -192,7 +191,7 @@ const Mutation: GQLMutationResolvers = {
   async deleteLocationBank(_, params, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
     }
 
     return context.dataSources.locationBankAPI.deleteLocationBank({

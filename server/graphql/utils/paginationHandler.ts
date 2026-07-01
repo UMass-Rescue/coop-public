@@ -1,7 +1,7 @@
-import { UserInputError } from 'apollo-server-express';
 import { type GraphQLFieldResolver as Resolver } from 'graphql';
 
 import { type JSON } from '../../utils/json-schema-types.js';
+import { userInputError } from './errors.js';
 
 /**
  * A type describing the arguments a connection field receives in GraphQL.
@@ -92,8 +92,8 @@ export function makeConnectionResolver<
   CursorValue extends JSON,
   Node extends object = object,
   Context = unknown,
-  Args extends
-    ConnectionArguments<CursorValue> = ConnectionArguments<CursorValue>,
+  Args extends ConnectionArguments<CursorValue> =
+    ConnectionArguments<CursorValue>,
 >(
   fetcher: (args: {
     size: number;
@@ -121,7 +121,7 @@ export function makeConnectionResolver<
     // https://jsonapi.org/profiles/ethanresnick/cursor-pagination/#auto-id-error-cases
     const { takeFrom, pageSize } = (() => {
       if (first != null && last != null) {
-        throw new UserInputError(`Cannot specify both first and last`);
+        throw userInputError(`Cannot specify both first and last`);
       } else if (first != null) {
         return { takeFrom: 'start', pageSize: first } as const;
       } else if (last != null) {
@@ -132,11 +132,11 @@ export function makeConnectionResolver<
     })();
 
     if (pageSize <= 0) {
-      throw new UserInputError('Page size must be a positive number.');
+      throw userInputError('Page size must be a positive number.');
     }
 
     if (pageSize > maxPageSize) {
-      throw new UserInputError(
+      throw userInputError(
         `Page size must be less than or equal to ${maxPageSize}.`,
       );
     }
@@ -147,7 +147,7 @@ export function makeConnectionResolver<
     // where the user explicitly provided only one cursor, but we synthesized
     // the other.
     if (before != null && after != null) {
-      throw new UserInputError('Combining before and after is not supported.');
+      throw userInputError('Combining before and after is not supported.');
     }
 
     // figure out the direction we're paginating in,

@@ -2,8 +2,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type Bottle from '@ethanresnick/bottlejs';
 
-import { __throw } from '../utils/misc.js';
 import { jsonStringify } from '../utils/encoding.js';
+import { __throw } from '../utils/misc.js';
 import { type Dependencies as Deps } from './index.js';
 
 const DEPENDENCIES = Symbol();
@@ -664,6 +664,17 @@ export function safeGetEnvVar(varName: string): string {
 }
 
 /**
+ * Returns true when the env var is set to a truthy value. Accepts `true`, `1`,
+ * and `yes` (case-insensitive) so callers don't have to worry about casing or
+ * common aliases. Any other value (including unset) returns false.
+ */
+export function isEnvTrue(varName: string): boolean {
+  const raw = process.env[varName];
+  if (raw == null) return false;
+  return ['true', '1', 'yes'].includes(raw.trim().toLowerCase());
+}
+
+/**
  * Gets an env var and parses it as a positive integer. Returns `defaultValue`
  * if the variable is unset or invalid, logging an error on misconfiguration.
  */
@@ -675,6 +686,27 @@ export function safeGetEnvInt(varName: string, defaultValue: number): number {
     // eslint-disable-next-line no-console
     console.error(
       `Invalid env var ${varName}: expected a positive integer, got ${jsonStringify(raw)}. Using default value ${defaultValue}.`,
+    );
+    return defaultValue;
+  }
+  return parsed;
+}
+
+/**
+ * Like `safeGetEnvInt` but allows `0`. Use when zero is a meaningful value
+ * (e.g. disabling retries, no timeout).
+ */
+export function safeGetEnvNonNegativeInt(
+  varName: string,
+  defaultValue: number,
+): number {
+  const raw = process.env[varName];
+  if (raw === undefined) return defaultValue;
+  const parsed = parseInt(raw, 10);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    // eslint-disable-next-line no-console
+    console.error(
+      `Invalid env var ${varName}: expected a non-negative integer, got ${jsonStringify(raw)}. Using default value ${defaultValue}.`,
     );
     return defaultValue;
   }

@@ -3,14 +3,28 @@
  */
 
 /* eslint-disable max-classes-per-file */
+import { type Kysely } from 'kysely';
+
+import {
+  ClickhouseAnalyticsAdapter as ClickhouseAnalyticsPlugin,
+  NoOpAnalyticsAdapter,
+  type IAnalyticsAdapter,
+} from '../../plugins/analytics/index.js';
+import {
+  ClickhouseWarehouseAdapter,
+  NoOpWarehouseAdapter,
+  type IWarehouseAdapter,
+} from '../../plugins/warehouse/index.js';
+import { assertUnreachable } from '../../utils/misc.js';
+import type SafeTracer from '../../utils/SafeTracer.js';
 import {
   ClickhouseKyselyAdapter,
   type ClickhouseConnectionSettings,
 } from './ClickhouseAdapter.js';
 import {
+  type DataWarehousePoolSettings,
   type IDataWarehouse,
   type IDataWarehouseDialect,
-  type DataWarehousePoolSettings,
   type DataWarehouseProvider as IDataWarehouseProvider,
   type TransactionFunction,
 } from './IDataWarehouse.js';
@@ -22,33 +36,14 @@ import type {
   IDataWarehouseAnalytics,
 } from './IDataWarehouseAnalytics.js';
 import { PostgresAnalyticsAdapter } from './PostgresAnalyticsAdapter.js';
-import {
-  ClickhouseWarehouseAdapter,
-  NoOpWarehouseAdapter,
-  type IWarehouseAdapter,
-} from '../../plugins/warehouse/index.js';
-import {
-  ClickhouseAnalyticsAdapter as ClickhouseAnalyticsPlugin,
-  NoOpAnalyticsAdapter,
-  type IAnalyticsAdapter,
-  type AnalyticsEventInput,
-} from '../../plugins/analytics/index.js';
-import { assertUnreachable } from '../../utils/misc.js';
-import type SafeTracer from '../../utils/SafeTracer.js';
 
 /**
  * Concrete data warehouse providers
  * Extend this type to add new warehouse implementations
  */
-export type DataWarehouseProvider =
-  | 'clickhouse'
-  | 'postgresql'
-  | 'noop';
+export type DataWarehouseProvider = 'clickhouse' | 'postgresql' | 'noop';
 
-export type AnalyticsProvider =
-  | 'clickhouse'
-  | 'postgresql'
-  | 'noop';
+export type AnalyticsProvider = 'clickhouse' | 'postgresql' | 'noop';
 
 // Re-export the interface provider type for external use
 export type { IDataWarehouseProvider };
@@ -77,6 +72,24 @@ export type DataWarehouseConfig =
       analyticsProvider?: AnalyticsProvider;
     };
 
+class NoOpKyselyDialect implements IDataWarehouseDialect {
+  getKyselyInstance(): Kysely<any> {
+    // Return a proxy so services can hold a Kysely reference without
+    // crashing at startup; any attempt to build or execute a query throws.
+    return new Proxy({} as Kysely<any>, {
+      get(_target, prop) {
+        if (prop === 'destroy') return async () => {};
+        if (prop === 'then') return undefined; // not thenable
+        if (typeof prop === 'symbol') return undefined;
+        return () => {
+          throw new Error('NoOp dialect: Kysely queries are not supported');
+        };
+      },
+    });
+  }
+  async destroy(): Promise<void> {}
+}
+
 class WarehouseAdapterBridge implements IDataWarehouse {
   constructor(
     private readonly provider: DataWarehouseProvider,
@@ -94,7 +107,10 @@ class WarehouseAdapterBridge implements IDataWarehouse {
     };
 
     return tracer.addActiveSpan(
-      { resource: `${this.provider}.client`, operation: `${this.provider}.query` },
+      {
+        resource: `${this.provider}.client`,
+        operation: `${this.provider}.query`,
+      },
       runQuery,
     );
   }
@@ -103,7 +119,7 @@ class WarehouseAdapterBridge implements IDataWarehouse {
     return this.adapter.transaction(async (warehouseQuery) => {
       return fn(async (statement, parameters = []) => {
         const rows = await warehouseQuery(statement, parameters);
-        return Array.from(rows) as unknown[];
+        return Array.from(rows);
       });
     });
   }
@@ -125,9 +141,7 @@ class WarehouseAdapterBridge implements IDataWarehouse {
   }
 }
 
-class AnalyticsAdapterBridge
-  implements IDataWarehouseAnalytics
-{
+class AnalyticsAdapterBridge implements IDataWarehouseAnalytics {
   constructor(
     private readonly provider: DataWarehouseProvider,
     private readonly adapter: IAnalyticsAdapter,
@@ -140,7 +154,7 @@ class AnalyticsAdapterBridge
   ): Promise<void> {
     await this.adapter.writeEvents(
       tableName,
-      rows as readonly AnalyticsEventInput[],
+      rows,
       config?.batchTimeout !== undefined
         ? { batchTimeout: config.batchTimeout }
         : undefined,
@@ -195,10 +209,7 @@ export class DataWarehouseFactory {
   static createDataWarehouse(config: DataWarehouseConfig): IDataWarehouse {
     switch (config.provider) {
       case 'noop':
-        return new WarehouseAdapterBridge(
-          'noop',
-          new NoOpWarehouseAdapter(),
-        );
+        return new WarehouseAdapterBridge('noop', new NoOpWarehouseAdapter());
       case 'clickhouse':
         return new WarehouseAdapterBridge(
           'clickhouse',
@@ -207,11 +218,16 @@ export class DataWarehouseFactory {
           }),
         );
       case 'postgresql':
-        return new WarehouseAdapterBridge('postgresql', new NoOpWarehouseAdapter());
+        return new WarehouseAdapterBridge(
+          'postgresql',
+          new NoOpWarehouseAdapter(),
+        );
       default:
         return assertUnreachable(
           config,
-          `Unknown data warehouse provider: ${(config as DataWarehouseConfig).provider}`,
+          `Unknown data warehouse provider: ${
+            (config as DataWarehouseConfig).provider
+          }`,
         );
     }
   }
@@ -228,11 +244,13 @@ export class DataWarehouseFactory {
       case 'postgresql':
         throw new Error('PostgreSQL Kysely dialect not yet implemented');
       case 'noop':
-        throw new Error('NoOp provider does not support Kysely dialect');
+        return new NoOpKyselyDialect();
       default:
         return assertUnreachable(
           config,
-          `Unknown data warehouse provider: ${(config as DataWarehouseConfig).provider}`,
+          `Unknown data warehouse provider: ${
+            (config as DataWarehouseConfig).provider
+          }`,
         );
     }
   }
@@ -245,8 +263,7 @@ export class DataWarehouseFactory {
     config: DataWarehouseConfig,
     dialect?: IDataWarehouseDialect,
   ): IDataWarehouseAnalytics {
-    const analyticsProvider =
-      config.analyticsProvider ?? (config.provider as AnalyticsProvider);
+    const analyticsProvider = config.analyticsProvider ?? config.provider;
 
     switch (analyticsProvider) {
       case 'noop':
@@ -281,7 +298,7 @@ export class DataWarehouseFactory {
   /**
    * Create configuration from environment variables
    */
-  // eslint-disable-next-line complexity
+
   static createConfigFromEnv(): DataWarehouseConfig {
     const provider = (process.env.WAREHOUSE_ADAPTER ??
       process.env.DATA_WAREHOUSE_PROVIDER ??
@@ -307,7 +324,9 @@ export class DataWarehouseFactory {
             username: process.env.CLICKHOUSE_USERNAME ?? 'default',
             password: process.env.CLICKHOUSE_PASSWORD ?? '',
             database: process.env.CLICKHOUSE_DATABASE ?? 'default',
-            protocol: (process.env.CLICKHOUSE_PROTOCOL ?? 'http') as 'http' | 'https',
+            protocol: (process.env.CLICKHOUSE_PROTOCOL ?? 'http') as
+              | 'http'
+              | 'https',
           },
           pool: {
             max: process.env.CLICKHOUSE_POOL_SIZE
@@ -337,4 +356,3 @@ export class DataWarehouseFactory {
     }
   }
 }
-

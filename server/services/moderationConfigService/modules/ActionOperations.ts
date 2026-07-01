@@ -1,19 +1,64 @@
-import { type Kysely } from 'kysely';
-import { type JsonObject, type Writable } from 'type-fest';
+import { sql, type Kysely } from 'kysely';
+import { type JsonObject, type JsonValue, type Writable } from 'type-fest';
 import { uid } from 'uid';
 
 import {
   CoopError,
   ErrorType,
+  makeNotFoundError,
   type ErrorInstanceData,
 } from '../../../utils/errors.js';
 import {
+  isUniqueViolationError,
   type FixKyselyRowCorrelation,
-  type FixSingleTableReturnedRowType,
 } from '../../../utils/kysely.js';
-import { assertUnreachable } from '../../../utils/misc.js';
+import { makeKyselyTransactionWithRetry } from '../../../utils/kyselyTransactionWithRetry.js';
+import { assertUnreachable, removeUndefinedKeys } from '../../../utils/misc.js';
 import { type ModerationConfigServicePg } from '../dbTypes.js';
-import { type Action } from '../index.js';
+import { type Action, type CustomAction } from '../index.js';
+import { type ItemTypeKind } from '../types/itemTypes.js';
+import {
+  serializeParameters,
+  validateActionParameters,
+  type RawActionParameterInput,
+} from './actionParametersValidation.js';
+
+function assertCustomAction(action: Action): asserts action is CustomAction {
+  if (action.actionType !== 'CUSTOM_ACTION') {
+    throw new Error(`Expected CUSTOM_ACTION but received ${action.actionType}`);
+  }
+}
+
+// Seeded once per org by upsertBuiltInActions; not creatable/editable via the
+// CRUD APIs, which are scoped to action_type='CUSTOM_ACTION'.
+export const BUILT_IN_ACTIONS = [
+  {
+    actionType: 'ENQUEUE_TO_MRT',
+    name: 'Enqueue Item to Manual Review',
+    description:
+      'Sends the matched item directly to a manual review queue, routed by the org\u2019s MRT routing rules.',
+    appliesToAllItemsOfKind: ['CONTENT', 'USER', 'THREAD'] as const,
+  },
+  {
+    actionType: 'ENQUEUE_AUTHOR_TO_MRT',
+    name: 'Enqueue Author for Manual Review',
+    description:
+      'Sends the author of the matched content to a manual review queue, with the matched item attached as context.',
+    appliesToAllItemsOfKind: ['CONTENT'] as const,
+  },
+  {
+    actionType: 'ENQUEUE_TO_NCMEC',
+    name: 'Enqueue for NCMEC Review',
+    description:
+      'Sends the user associated with the matched item to the NCMEC review flow, gathering their media for reporting.',
+    appliesToAllItemsOfKind: ['CONTENT', 'USER'] as const,
+  },
+] as const satisfies readonly {
+  actionType: Exclude<Action['actionType'], 'CUSTOM_ACTION'>;
+  name: string;
+  description: string;
+  appliesToAllItemsOfKind: readonly ItemTypeKind[];
+}[];
 
 const actionDbSelection = [
   'id',
@@ -27,6 +72,22 @@ const actionDbSelection = [
   'action_type as actionType',
   'applies_to_all_items_of_kind as appliesToAllItemsOfKind',
   'apply_user_strikes as applyUserStrikes',
+  'custom_mrt_api_params as customMrtApiParams',
+] as const;
+
+const actionJoinDbSelection = [
+  'a.id',
+  'a.name',
+  'a.description',
+  'a.callback_url as callbackUrl',
+  'a.callback_url_headers as callbackUrlHeaders',
+  'a.callback_url_body as callbackUrlBody',
+  'a.org_id as orgId',
+  'a.penalty',
+  'a.action_type as actionType',
+  'a.applies_to_all_items_of_kind as appliesToAllItemsOfKind',
+  'a.apply_user_strikes as applyUserStrikes',
+  'a.custom_mrt_api_params as customMrtApiParams',
 ] as const;
 
 type ActionDbResult = FixKyselyRowCorrelation<
@@ -35,10 +96,16 @@ type ActionDbResult = FixKyselyRowCorrelation<
 >;
 
 export default class ActionOperations {
+  private readonly transactionWithRetry: ReturnType<
+    typeof makeKyselyTransactionWithRetry<ModerationConfigServicePg>
+  >;
+
   constructor(
     private readonly pgQuery: Kysely<ModerationConfigServicePg>,
     private readonly pgQueryReplica: Kysely<ModerationConfigServicePg>,
-  ) {}
+  ) {
+    this.transactionWithRetry = makeKyselyTransactionWithRetry(this.pgQuery);
+  }
 
   async createAction(
     orgId: string,
@@ -53,40 +120,284 @@ export default class ActionOperations {
       callbackUrlHeaders: JsonObject | null;
       callbackUrlBody: JsonObject | null;
       applyUserStrikes?: boolean;
-      // TODO: linking specific item types not yet supported.
+      itemTypeIds?: readonly string[];
+      // AJV narrows this to `readonly ActionParameter[]` and rejects nulls /
+      // unknown fields; the GraphQL input shape is wider (nullable optionals)
+      // so we accept arbitrary property bags here.
+      parameters?: readonly RawActionParameterInput[] | null;
     },
-  ) {
-    return this.pgQuery.transaction().execute(async (trx) => {
-      const query = trx
-        .insertInto('public.actions')
-        .values({
-          id: uid(),
-          name: input.name,
-          description: input.description,
-          org_id: orgId,
-          action_type: input.type,
-          callback_url: input.callbackUrl,
-          callback_url_headers: input.callbackUrlHeaders,
-          callback_url_body: input.callbackUrlBody,
-          penalty: 'NONE',
-          apply_user_strikes: input.applyUserStrikes ?? false,
-        })
-        .returning(actionDbSelection);
+  ): Promise<CustomAction> {
+    const parameters = validateActionParameters(input.parameters ?? null);
 
-      // eslint-disable-next-line no-useless-catch
+    return this.transactionWithRetry(async (trx) => {
       try {
-        const actionRow =
-          (await query.executeTakeFirstOrThrow()) as FixSingleTableReturnedRowType<
-            typeof query
-          >;
+        const query = trx
+          .insertInto('public.actions')
+          .values({
+            id: uid(),
+            name: input.name,
+            description: input.description,
+            org_id: orgId,
+            action_type: input.type,
+            callback_url: input.callbackUrl,
+            callback_url_headers: input.callbackUrlHeaders,
+            callback_url_body: input.callbackUrlBody,
+            penalty: 'NONE',
+            apply_user_strikes: input.applyUserStrikes ?? false,
+            custom_mrt_api_params: serializeParameters(parameters),
+            updated_at: new Date(),
+          })
+          .returning(actionDbSelection);
 
-        return this.#dbResultToAction(actionRow);
-      } catch (e) {
-        // TODO: catch specific error for duplicate action name and call
-        // makeActionNameExistsError and throw that error instead.
+        const actionRow =
+          (await query.executeTakeFirstOrThrow()) as ActionDbResult;
+
+        if (input.itemTypeIds !== undefined && input.itemTypeIds.length > 0) {
+          await trx
+            .insertInto('public.actions_and_item_types')
+            .values(
+              input.itemTypeIds.map((item_type_id) => ({
+                action_id: actionRow.id,
+                item_type_id,
+              })),
+            )
+            .execute();
+        }
+
+        const action = this.#dbResultToAction(actionRow);
+        assertCustomAction(action);
+        return action;
+      } catch (e: unknown) {
+        if (isUniqueViolationError(e)) {
+          throw makeActionNameExistsError({ shouldErrorSpan: true });
+        }
         throw e;
       }
     });
+  }
+
+  // Idempotent: existing built-ins are detected by (org_id, action_type).
+  async upsertBuiltInActions(orgId: string): Promise<readonly Action[]> {
+    return this.transactionWithRetry(async (trx) => {
+      const existingByType = new Set(
+        (
+          (await trx
+            .selectFrom('public.actions')
+            .select('action_type as actionType')
+            .where('org_id', '=', orgId)
+            .where('action_type', '!=', 'CUSTOM_ACTION')
+            .execute()) as { actionType: Action['actionType'] }[]
+        ).map((row) => row.actionType),
+      );
+
+      const toInsert = BUILT_IN_ACTIONS.filter(
+        (b) => !existingByType.has(b.actionType),
+      ).map((b) => ({
+        id: uid(),
+        name: b.name,
+        description: b.description,
+        org_id: orgId,
+        action_type: b.actionType,
+        callback_url: null,
+        callback_url_headers: null,
+        callback_url_body: null,
+        penalty: 'NONE' as const,
+        apply_user_strikes: false,
+        applies_to_all_items_of_kind: [...b.appliesToAllItemsOfKind],
+        updated_at: new Date(),
+      }));
+
+      if (toInsert.length > 0) {
+        await trx
+          .insertInto('public.actions')
+          .values(toInsert)
+          .onConflict((oc) => oc.doNothing())
+          .execute();
+      }
+
+      const refreshed = (await trx
+        .selectFrom('public.actions')
+        .select(actionDbSelection)
+        .where('org_id', '=', orgId)
+        .where('action_type', '!=', 'CUSTOM_ACTION')
+        .execute()) as ActionDbResult[];
+
+      return refreshed.map((row) => this.#dbResultToAction(row));
+    });
+  }
+
+  async updateCustomAction(opts: {
+    orgId: string;
+    actionId: string;
+    patch: {
+      name?: string;
+      description?: string | null;
+      callbackUrl?: string;
+      callbackUrlHeaders?: JsonObject | null;
+      callbackUrlBody?: JsonObject | null;
+      applyUserStrikes?: boolean;
+      // `undefined` = leave unchanged. Pass `[]` to clear all parameters.
+      parameters?: readonly RawActionParameterInput[] | null;
+    };
+    itemTypeIds?: readonly string[] | undefined;
+  }): Promise<CustomAction> {
+    const { orgId, actionId, patch, itemTypeIds } = opts;
+    const validatedParameters =
+      patch.parameters === undefined
+        ? undefined
+        : validateActionParameters(patch.parameters);
+    return this.transactionWithRetry(async (trx) => {
+      const existing = (await trx
+        .selectFrom('public.actions')
+        .select(actionDbSelection)
+        .where('id', '=', actionId)
+        .where('org_id', '=', orgId)
+        .where('action_type', '=', 'CUSTOM_ACTION')
+        .executeTakeFirst()) as ActionDbResult | undefined;
+
+      if (existing == null) {
+        throw makeNotFoundError('Action not found', { shouldErrorSpan: true });
+      }
+
+      const setPayload = removeUndefinedKeys({
+        name: patch.name,
+        description: patch.description,
+        callback_url: patch.callbackUrl,
+        callback_url_headers: patch.callbackUrlHeaders,
+        callback_url_body: patch.callbackUrlBody,
+        apply_user_strikes: patch.applyUserStrikes,
+        custom_mrt_api_params:
+          validatedParameters === undefined
+            ? undefined
+            : serializeParameters(validatedParameters),
+      });
+      const hasUserFields = Object.keys(setPayload).length > 0;
+      const touchesJunction = itemTypeIds !== undefined;
+
+      if (!hasUserFields && !touchesJunction) {
+        const action = this.#dbResultToAction(existing);
+        assertCustomAction(action);
+        return action;
+      }
+
+      try {
+        if (hasUserFields) {
+          await trx
+            .updateTable('public.actions')
+            .set({
+              ...setPayload,
+              updated_at: new Date(),
+            })
+            .where('id', '=', actionId)
+            .where('org_id', '=', orgId)
+            .execute();
+        }
+
+        if (itemTypeIds !== undefined) {
+          await trx
+            .deleteFrom('public.actions_and_item_types')
+            .where('action_id', '=', actionId)
+            .execute();
+          if (itemTypeIds.length > 0) {
+            await trx
+              .insertInto('public.actions_and_item_types')
+              .values(
+                itemTypeIds.map((item_type_id) => ({
+                  action_id: actionId,
+                  item_type_id,
+                })),
+              )
+              .execute();
+          }
+        }
+
+        const refreshed = (await trx
+          .selectFrom('public.actions')
+          .select(actionDbSelection)
+          .where('id', '=', actionId)
+          .where('org_id', '=', orgId)
+          .executeTakeFirstOrThrow()) as ActionDbResult;
+
+        const action = this.#dbResultToAction(refreshed);
+        assertCustomAction(action);
+        return action;
+      } catch (e: unknown) {
+        if (isUniqueViolationError(e)) {
+          throw makeActionNameExistsError({ shouldErrorSpan: true });
+        }
+        throw e;
+      }
+    });
+  }
+
+  async deleteCustomAction(opts: { orgId: string; actionId: string }) {
+    const { orgId, actionId } = opts;
+    return this.transactionWithRetry(async (trx) => {
+      const row = await trx
+        .selectFrom('public.actions')
+        .select('id')
+        .where('id', '=', actionId)
+        .where('org_id', '=', orgId)
+        .where('action_type', '=', 'CUSTOM_ACTION')
+        .executeTakeFirst();
+
+      if (row == null) {
+        return false;
+      }
+
+      await trx
+        .deleteFrom('public.rules_and_actions')
+        .where('action_id', '=', actionId)
+        .execute();
+      await trx
+        .deleteFrom('public.actions_and_item_types')
+        .where('action_id', '=', actionId)
+        .execute();
+      await trx
+        .deleteFrom('public.actions')
+        .where('id', '=', actionId)
+        .where('org_id', '=', orgId)
+        .execute();
+
+      return true;
+    });
+  }
+
+  async getActionsForItemType(opts: {
+    orgId: string;
+    itemTypeId: string;
+    itemTypeKind: ItemTypeKind;
+    readFromReplica?: boolean;
+  }) {
+    const { orgId, itemTypeId, itemTypeKind, readFromReplica } = opts;
+    const pgQuery = this.#getPgQuery(readFromReplica);
+
+    const [viaJunction, viaAppliesAll] = await Promise.all([
+      pgQuery
+        .selectFrom('public.actions_and_item_types as ait')
+        .innerJoin('public.actions as a', 'a.id', 'ait.action_id')
+        .select(actionJoinDbSelection)
+        .where('ait.item_type_id', '=', itemTypeId)
+        .where('a.org_id', '=', orgId)
+        .execute(),
+      pgQuery
+        .selectFrom('public.actions as a')
+        .select(actionJoinDbSelection)
+        .where('a.org_id', '=', orgId)
+        .where(
+          sql<boolean>`${itemTypeKind}::text = ANY(a.applies_to_all_items_of_kind::text[])`,
+        )
+        .execute(),
+    ]);
+
+    const junctionRows = viaJunction as ActionDbResult[];
+    const appliesAllRows = viaAppliesAll as ActionDbResult[];
+
+    const byId = new Map<string, ActionDbResult>();
+    for (const row of [...junctionRows, ...appliesAllRows]) {
+      byId.set(row.id, row);
+    }
+    return [...byId.values()].map((it) => this.#dbResultToAction(it));
   }
 
   async getActions(opts: {
@@ -102,19 +413,51 @@ export default class ActionOperations {
       .where('org_id', '=', orgId)
       .$if(ids !== undefined, (qb) => qb.where('id', 'in', ids!));
 
-    const results = (await query.execute()) as FixSingleTableReturnedRowType<
-      typeof query
-    >[];
+    const results = (await query.execute()) as ActionDbResult[];
 
     return results.map((it) => this.#dbResultToAction(it));
+  }
+
+  // Returns each action attached to a rule paired with the parameter values
+  // configured for it. Powers proactive rule execution and pre-fills the rule editor.
+  async getActionsForRuleId(opts: {
+    orgId: string;
+    ruleId: string;
+    readFromReplica?: boolean;
+  }): Promise<readonly { action: Action; parameters: JsonObject }[]> {
+    const { orgId, ruleId, readFromReplica } = opts;
+    const results = (await this.#getPgQuery(readFromReplica)
+      .selectFrom('public.rules_and_actions as raa')
+      .innerJoin('public.actions as a', 'a.id', 'raa.action_id')
+      .select([...actionJoinDbSelection, 'raa.action_parameters'])
+      .where('raa.rule_id', '=', ruleId)
+      .where('a.org_id', '=', orgId)
+      .execute()) as (ActionDbResult & {
+      action_parameters: JsonObject | null;
+    })[];
+    return results.map((it) => ({
+      action: this.#dbResultToAction(it),
+      parameters: it.action_parameters ?? {},
+    }));
+  }
+
+  private static customMrtApiParamsFromDb(
+    value: JsonValue[] | null,
+  ): JsonValue | null {
+    if (value == null || value.length === 0) {
+      return null;
+    }
+    return value;
   }
 
   #dbResultToAction(it: ActionDbResult) {
     return {
       id: it.id,
       name: it.name,
+      description: it.description,
       orgId: it.orgId,
       applyUserStrikes: it.applyUserStrikes,
+      penalty: it.penalty,
       ...(() => {
         switch (it.actionType) {
           case 'CUSTOM_ACTION':
@@ -123,6 +466,9 @@ export default class ActionOperations {
               callbackUrl: it.callbackUrl,
               callbackUrlBody: it.callbackUrlBody,
               callbackUrlHeaders: it.callbackUrlHeaders,
+              customMrtApiParams: ActionOperations.customMrtApiParamsFromDb(
+                it.customMrtApiParams,
+              ),
             };
           case 'ENQUEUE_TO_MRT':
           case 'ENQUEUE_TO_NCMEC':

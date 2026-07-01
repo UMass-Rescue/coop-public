@@ -1,4 +1,3 @@
-// eslint-disable-next-line import/no-extraneous-dependencies
 import { createClient, type ClickHouseClient } from '@clickhouse/client';
 import {
   Kysely,
@@ -15,10 +14,11 @@ import {
   type TransactionSettings,
 } from 'kysely';
 
+import { getClickhouseMemorySettings } from '../../plugins/warehouse/utils/clickhouseSettings.js';
 import { formatClickhouseQuery } from '../../plugins/warehouse/utils/clickhouseSql.js';
 import type {
-  IDataWarehouseDialect,
   DataWarehousePoolSettings,
+  IDataWarehouseDialect,
 } from './IDataWarehouse.js';
 
 export interface ClickhouseConnectionSettings {
@@ -31,8 +31,13 @@ export interface ClickhouseConnectionSettings {
 }
 
 function createConnection(client: ClickHouseClient): DatabaseConnection {
-  const execute = async <R>(compiledQuery: CompiledQuery): Promise<QueryResult<R>> => {
-    const statement = formatClickhouseQuery(compiledQuery.sql, compiledQuery.parameters);
+  const execute = async <R>(
+    compiledQuery: CompiledQuery,
+  ): Promise<QueryResult<R>> => {
+    const statement = formatClickhouseQuery(
+      compiledQuery.sql,
+      compiledQuery.parameters,
+    );
     const result = await client.query({
       query: statement,
       format: 'JSONEachRow',
@@ -45,7 +50,9 @@ function createConnection(client: ClickHouseClient): DatabaseConnection {
   return {
     executeQuery: execute,
     streamQuery<R>(compiledQuery: CompiledQuery) {
-      return (async function* iterator(): AsyncIterableIterator<QueryResult<R>> {
+      return (async function* iterator(): AsyncIterableIterator<
+        QueryResult<R>
+      > {
         yield await execute<R>(compiledQuery);
       })();
     },
@@ -64,13 +71,19 @@ function createDriver(client: ClickHouseClient): Driver {
       _connection: DatabaseConnection,
       _settings: TransactionSettings,
     ) {
-      throw new Error('ClickHouse does not support multi-statement transactions');
+      throw new Error(
+        'ClickHouse does not support multi-statement transactions',
+      );
     },
     async commitTransaction() {
-      throw new Error('ClickHouse does not support multi-statement transactions');
+      throw new Error(
+        'ClickHouse does not support multi-statement transactions',
+      );
     },
     async rollbackTransaction() {
-      throw new Error('ClickHouse does not support multi-statement transactions');
+      throw new Error(
+        'ClickHouse does not support multi-statement transactions',
+      );
     },
     async releaseConnection(_connection: DatabaseConnection) {
       // Nothing to release; HTTP client pools internally.
@@ -92,6 +105,7 @@ function createDialect(client: ClickHouseClient): Dialect {
     createAdapter(): DialectAdapter {
       return new PostgresAdapter();
     },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Kysely's Dialect interface hardcodes Kysely<any> for createIntrospector
     createIntrospector(db: Kysely<any>) {
       return new PostgresIntrospector(db);
     },
@@ -100,8 +114,7 @@ function createDialect(client: ClickHouseClient): Dialect {
 
 export class ClickhouseKyselyAdapter implements IDataWarehouseDialect {
   private readonly client: ClickHouseClient;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private readonly kysely: Kysely<any>;
+  private readonly kysely: Kysely<Record<string, unknown>>;
 
   constructor(
     connectionSettings: ClickhouseConnectionSettings,
@@ -112,7 +125,8 @@ export class ClickhouseKyselyAdapter implements IDataWarehouseDialect {
 
     const url = `${protocol}://${connectionSettings.host}:${port}`;
     const rawPassword = connectionSettings.password;
-    const password = rawPassword && rawPassword.length > 0 ? rawPassword : undefined;
+    const password =
+      rawPassword && rawPassword.length > 0 ? rawPassword : undefined;
     this.client = createClient({
       url,
       username: connectionSettings.username,
@@ -120,16 +134,18 @@ export class ClickhouseKyselyAdapter implements IDataWarehouseDialect {
       database: connectionSettings.database,
       clickhouse_settings: {
         allow_experimental_object_type: 1,
+        ...getClickhouseMemorySettings(),
       },
     });
 
-    this.kysely = new Kysely({
+    this.kysely = new Kysely<Record<string, unknown>>({
       dialect: createDialect(this.client),
     });
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  getKyselyInstance(): Kysely<any> {
+  // The interface declares Kysely<any> but we implement with a concrete schema type;
+  // callers that need a specific schema cast the result themselves.
+  getKyselyInstance(): Kysely<Record<string, unknown>> {
     return this.kysely;
   }
 
@@ -137,4 +153,3 @@ export class ClickhouseKyselyAdapter implements IDataWarehouseDialect {
     await this.kysely.destroy();
   }
 }
-

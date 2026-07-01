@@ -1,4 +1,4 @@
-import { type ItemIdentifier } from '@roostorg/types';
+import { type ItemIdentifier } from '@roostorg/coop-types';
 import { type Opaque, type ReadonlyDeep, type UnwrapOpaque } from 'type-fest';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -93,8 +93,9 @@ export type ItemSubmission<Type extends ItemType = ItemType> = Opaque<
     /**
      * The ItemIdentifier for the user that created this item.
      *
-     * NB: this only applies to content items; user items don't list the user as
-     * the item's creator, and threads don't (yet) have creators.
+     * Populated from the item type's `creatorId` field role for both CONTENT
+     * and THREAD item types. USER items don't list themselves as their own
+     * creator.
      *
      * NB: this could be generated from the schema and field roles on the
      * itemType, but to support older users who submitted the creator as a
@@ -286,11 +287,11 @@ export async function rawItemSubmissionToItemSubmission(
   };
 }
 
-function getCreator(itemType: ItemType, itemData: NormalizedItemData) {
+export function getCreator(itemType: ItemType, itemData: NormalizedItemData) {
   switch (itemType.kind) {
-    case 'THREAD':
     case 'USER':
       return undefined;
+    case 'THREAD':
     case 'CONTENT':
       return getFieldValueForRole(
         itemType.schema,

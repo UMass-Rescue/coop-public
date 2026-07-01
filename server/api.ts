@@ -1,45 +1,42 @@
-/* eslint-disable max-lines */
-// In this case, we want to rely on apollo-server-express bundling a
-// corresponding version of apollo-server-core, rather than picking an
-// apollo-server-core version in package.json
-// eslint-disable-next-line import/no-extraneous-dependencies
 import os from 'node:os';
 import path from 'path';
+import { ApolloServer } from '@apollo/server';
+import { unwrapResolverError } from '@apollo/server/errors';
+import { ApolloServerPluginLandingPageDisabled } from '@apollo/server/plugin/disabled';
+import { expressMiddleware } from '@as-integrations/express5';
 import { makeExecutableSchema } from '@graphql-tools/schema';
 import { MapperKind, mapSchema } from '@graphql-tools/utils';
+import {
+  MultiSamlStrategy,
+  type Profile,
+  type VerifiedCallback,
+} from '@node-saml/passport-saml';
 import { SpanStatusCode } from '@opentelemetry/api';
 import {
-  SEMATTRS_EXCEPTION_MESSAGE,
-  SEMATTRS_EXCEPTION_STACKTRACE,
-  SEMATTRS_EXCEPTION_TYPE,
+  ATTR_EXCEPTION_MESSAGE,
+  ATTR_EXCEPTION_STACKTRACE,
+  ATTR_EXCEPTION_TYPE,
 } from '@opentelemetry/semantic-conventions';
-import {
-  ApolloError,
-  ApolloServerPluginLandingPageDisabled,
-  ApolloServerPluginLandingPageGraphQLPlayground,
-} from 'apollo-server-core';
-import { ApolloServer } from 'apollo-server-express';
 import connectPgSimple from 'connect-pg-simple';
 import cors from 'cors';
-import express, { type ErrorRequestHandler } from 'express';
+import express, { type ErrorRequestHandler, type Request } from 'express';
 import session from 'express-session';
-import { buildContext, GraphQLLocalStrategy } from 'graphql-passport';
-import depthLimit from 'graphql-depth-limit';
+import { GraphQLError, type GraphQLFormattedError } from 'graphql';
 import helmet from 'helmet';
 import passport from 'passport';
-import { MultiSamlStrategy } from '@node-saml/passport-saml';
 
-import {
-  makeLoginIncorrectPasswordError,
-  makeLoginSsoRequiredError,
-  makeLoginUserDoesNotExistError,
-} from './graphql/datasources/UserApi.js';
-import resolvers from './graphql/resolvers.js';
+import { kyselyUserFindById } from './graphql/datasources/userKyselyPersistence.js';
+import resolvers, { type Context } from './graphql/resolvers.js';
 import typeDefs from './graphql/schema.js';
 import { authSchemaWrapper } from './graphql/utils/authorization.js';
+import { getOrgIdFromPath } from './graphql/utils/orgIdFromPath.js';
+import { buildPassportContext } from './graphql/utils/passportContext.js';
+import { resolveSamlUser } from './graphql/utils/resolveSamlUser.js';
+import { safeDepthLimit } from './graphql/utils/safeDepthLimit.js';
 import { type Dependencies } from './iocContainer/index.js';
 import { safeGetEnvInt } from './iocContainer/utils.js';
 import controllers from './routes/index.js';
+import { createBodySchemaValidator } from './utils/bodySchemaValidation.js';
 import { jsonStringify } from './utils/encoding.js';
 import {
   ErrorType,
@@ -95,7 +92,7 @@ const sessionStore = connectPgSimple(session);
 
 export default async function makeApiServer(deps: Dependencies) {
   const app = express();
-  const { User } = deps.Sequelize;
+  const { KyselyPg, KyselyPgPool } = deps;
 
   app.use(cors());
 
@@ -131,20 +128,11 @@ export default async function makeApiServer(deps: Dependencies) {
   /**
    * Passport & User Session Configuration
    */
-  const {
-    DATABASE_HOST,
-    DATABASE_PORT = 5432,
-    DATABASE_NAME,
-    DATABASE_USER,
-    DATABASE_PASSWORD,
-  } = process.env;
-
-  const connectionString = `postgres://${DATABASE_USER}:${DATABASE_PASSWORD}@${DATABASE_HOST}:${DATABASE_PORT}/${DATABASE_NAME}`;
-
+  const sessionStoreInstance = new sessionStore({ pool: KyselyPgPool });
   app.use(
     session({
       secret: process.env.SESSION_SECRET!,
-      store: new sessionStore({ conString: connectionString }),
+      store: sessionStoreInstance,
       cookie: {
         secure: process.env.NODE_ENV === 'production',
         httpOnly: true,
@@ -160,13 +148,22 @@ export default async function makeApiServer(deps: Dependencies) {
   app.use(passport.initialize());
   app.use(passport.session());
 
+  // Shared signon/logout verify: bind the user lookup to the org named in the
+  // callback path so an assertion authenticating one org can never resolve a
+  // user from another (GHSA-2v93-383c-9fw2).
+  const verify = async (
+    req: Request,
+    profile: Profile | null,
+    done: VerifiedCallback,
+  ) => resolveSamlUser(KyselyPg, deps.Tracer, req, profile, done);
+
   passport.use(
     new MultiSamlStrategy(
       {
         passReqToCallback: true,
         async getSamlOptions(req, done) {
-          // orgId path param should be set in the /saml/* route handlers
-          const orgId = req.params['orgId'];
+          // orgId path param should be set in the /saml/* route handlers.
+          const orgId = getOrgIdFromPath(req);
 
           if (!orgId) {
             return done(
@@ -176,9 +173,8 @@ export default async function makeApiServer(deps: Dependencies) {
             );
           }
 
-          const samlSettings = await deps.OrgSettingsService.getSamlSettings(
-            orgId,
-          );
+          const samlSettings =
+            await deps.OrgSettingsService.getSamlSettings(orgId);
 
           if (!samlSettings)
             return done(
@@ -205,50 +201,8 @@ export default async function makeApiServer(deps: Dependencies) {
           });
         },
       },
-      async (_req, profile, done) => {
-        try {
-          const user = await User.findOne({
-            where: { email: String(profile?.email) },
-          });
-          // we should have already checked for this, but couldn't hurt to check
-          // again
-          if (user == null) {
-            return done(
-              makeLoginUserDoesNotExistError({ shouldErrorSpan: true }),
-            );
-          }
-
-          return done(null, user as any);
-        } catch (e) {
-          return done(
-            makeInternalServerError('Unknown error during login attempt', {
-              shouldErrorSpan: true,
-            }),
-          );
-        }
-      },
-      async (_req, profile, done) => {
-        try {
-          const user = await User.findOne({
-            where: { email: String(profile?.email) },
-          });
-          // we should have already checked for this, but couldn't hurt to check
-          // again
-          if (user == null) {
-            return done(
-              makeLoginUserDoesNotExistError({ shouldErrorSpan: true }),
-            );
-          }
-
-          return done(null, user as any);
-        } catch (e) {
-          return done(
-            makeInternalServerError('Unknown error during login attempt', {
-              shouldErrorSpan: true,
-            }),
-          );
-        }
-      },
+      verify,
+      verify,
     ),
   );
 
@@ -259,7 +213,7 @@ export default async function makeApiServer(deps: Dependencies) {
 
   app.post(
     `/saml/login/:orgId/callback`,
-    express.urlencoded({ extended: false }),
+    express.urlencoded(),
     passport.authenticate('saml', {
       failureRedirect: '/',
       failureFlash: true,
@@ -269,80 +223,30 @@ export default async function makeApiServer(deps: Dependencies) {
     },
   );
 
-  passport.use(
-    new GraphQLLocalStrategy(async (email, password, done) => {
-      try {
-        const user = await User.findOne({ where: { email: String(email) } });
-        if (user == null) {
-          return done(
-            makeLoginUserDoesNotExistError({ shouldErrorSpan: true }),
-          );
-        }
-        const samlSettings = await deps.OrgSettingsService.getSamlSettings(
-          user.orgId,
-        );
-
-        if (
-          samlSettings?.saml_enabled &&
-          // We allow Coop users to log in with email/password even if SSO is
-          // enabled
-          // so Coop employees can manage user accounts
-          String(email).split('@')[1] !== 'getcoop.com'
-        ) {
-          return done(
-            makeLoginSsoRequiredError({
-              detail:
-                'SAML is enabled for this organization. Password login is disabled.',
-              shouldErrorSpan: true,
-            }),
-          );
-        }
-
-        if (!user.loginMethods.includes('password')) {
-          return done(
-            makeLoginIncorrectPasswordError({
-              detail: 'Password is not set for user.',
-              shouldErrorSpan: true,
-            }),
-          );
-        }
-
-        // if loginMethod is password, password should be set
-        if (
-          await User.passwordMatchesHash(
-            String(password),
-            user.password satisfies string | null as string,
-          )
-        ) {
-          done(null, user);
-        } else {
-          done(makeLoginIncorrectPasswordError({ shouldErrorSpan: true }));
-        }
-      } catch (e) {
-        deps.Tracer.logActiveSpanFailedIfAny(e);
-        return done(
-          makeInternalServerError('Unknown error during login attempt', {
-            shouldErrorSpan: true,
-          }),
-        );
-      }
-    }),
-  );
-
-  passport.serializeUser((user: any, done) => {
+  passport.serializeUser((user, done) => {
     done(null, user.id);
   });
 
   passport.deserializeUser(async (id, done) => {
-    return User.findByPk(String(id), { rejectOnEmpty: true }).then((user) => {
-      done(null, user);
-    }, done);
+    try {
+      const user = await kyselyUserFindById(KyselyPg, String(id));
+      if (user == null) {
+        return done(
+          makeNotFoundError(`Session user ${String(id)} not found`, {
+            shouldErrorSpan: true,
+          }),
+        );
+      }
+      return done(null, user);
+    } catch (e) {
+      return done(e);
+    }
   });
 
   /**
    * Apollo Server - uses /api/graphql path
    */
-  const apolloServer = new ApolloServer({
+  const apolloServer = new ApolloServer<Context>({
     schema: mapSchema(makeExecutableSchema({ typeDefs, resolvers }), {
       [MapperKind.QUERY_ROOT_FIELD](
         fieldConfig,
@@ -361,148 +265,154 @@ export default async function makeApiServer(deps: Dependencies) {
         return authSchemaWrapper(fieldConfig, schema);
       },
     }),
-    dataSources: () => deps.DataSources,
-    context: ({ req, res }) => {
-      return {
-        ...buildContext({ req, res }),
-        services: makeGqlServices(deps),
-      };
-    },
     plugins: [
-      {
-        ...(process.env.NODE_ENV === 'production'
-          ? ApolloServerPluginLandingPageDisabled()
-          : ApolloServerPluginLandingPageGraphQLPlayground()),
-      },
+      ...(process.env.NODE_ENV === 'production'
+        ? [ApolloServerPluginLandingPageDisabled()]
+        : []),
     ],
-    validationRules: [depthLimit(safeGetEnvInt('GRAPHQL_MAX_DEPTH', 10))],
+    validationRules: [safeDepthLimit(safeGetEnvInt('GRAPHQL_MAX_DEPTH', 10))],
     introspection: process.env.NODE_ENV !== 'production',
-    formatError(e) {
-      // `e` can be an ApolloError instance, but will only be one if such an
-      // instance (or an ApolloError subclass) was explicitly thrown from a
-      // resolver. In that case, we assume the thrower knows they're dealing
-      // with apollo, and we can just pass the error through as-is.
-      if (e instanceof ApolloError) {
-        return e;
+    formatError(formattedError, error) {
+      // unwrapResolverError removes the GraphQLError wrapper added by graphql-js
+      // when a non-GraphQL error is thrown from a resolver.
+      const rawError = unwrapResolverError(error);
+
+      // If the raw error is a GraphQLError (explicitly thrown by our code or
+      // generated by graphql-js for parse/validation errors), the formattedError
+      // is already correctly shaped -- pass it through.
+      if (rawError instanceof GraphQLError) {
+        return formattedError;
       }
 
-      // In almost all other cases, the error will be an instance of the
-      // `GraphQLError` class, which apollo instantiates automatically, and uses
-      // to wrap any non-ApolloError error thrown from a resolver. However,
-      // ocassionally -- e.g., if an error occurs during context creation rather
-      // than in the resolver -- the error doesn't get wrapped (or it's wrapped
-      // but with no originalError), so we handle both cases. Once we have the
-      // underlying error that was actually thrown, we sanitize it to remove
-      // sensitive details, and then try to format it in the most informative
-      // way possible.
-      const sanitizedError = sanitizeError(e.originalError ?? e);
+      // For all other errors (CoopError, unexpected errors, context errors),
+      // sanitize to remove sensitive details and reformat for the client.
+      const sanitizedError = sanitizeError(
+        rawError instanceof Error ? rawError : error,
+      );
       const { title: sanitizedErrorTitle, ...extensions } = sanitizedError;
 
-      return {
-        // When apollo-server wraps the resolver-thrown error in a GraphQLError,
+      const result: GraphQLFormattedError = {
+        // When graphql-js wraps the resolver-thrown error in a GraphQLError,
         // it automatically tracks some metadata about where the error was thrown
         // from. That can be useful to clients, in a way that's a bit different
         // from our CoopError.pointer field; it tells them whether a null
         // value was return in the response because a given resolver failed, or
         // because the field's value is actually null. So, we pass this
-        // apollo-annotated metdata through as-is.
-        locations: e.locations,
-        path: e.path,
+        // metadata through as-is.
+        locations: formattedError.locations,
+        path: formattedError.path,
         // Apollo server also defines some predefined error codes that it could
         // be helpful for us to mimic on our custom errors (in case Apollo
         // clients handle them out of the box). The true, Coop-assigned code
         // for the error, though, will be in the `type` key, just like when
         // sending errors in REST responses (though, for GQL, this lives under
         // `extensions`).
-        code: extensions.type.includes(ErrorType.Unauthenticated)
-          ? 'UNAUTHENTICATED'
-          : extensions.type.includes(ErrorType.Unauthorized)
-          ? 'FORBIDDEN'
-          : extensions.type.includes(ErrorType.InvalidUserInput)
-          ? 'BAD_USER_INPUT'
-          : 'INTERNAL_SERVER_ERROR',
-        // Then, this is info from the sanitized verion of the actual thrown error.
+        extensions: {
+          ...extensions,
+          code: extensions.type.includes(ErrorType.Unauthenticated)
+            ? 'UNAUTHENTICATED'
+            : extensions.type.includes(ErrorType.Unauthorized)
+              ? 'FORBIDDEN'
+              : extensions.type.includes(ErrorType.InvalidUserInput)
+                ? 'BAD_USER_INPUT'
+                : 'INTERNAL_SERVER_ERROR',
+        },
         message: sanitizedErrorTitle,
-        extensions,
       };
+      return result;
     },
   });
 
-  await apolloServer.start().then(() => {
-    apolloServer.applyMiddleware({ app });
-    Object.entries(controllers).forEach(([_k, controller]) => {
-      controller.routes.forEach((it) => {
-        const handler = it.handler(deps);
-        app[it.method](
-          path.join(controller.pathPrefix, it.path),
-          ...(Array.isArray(handler) ? handler : [handler]),
-        );
-      });
+  await apolloServer.start();
+
+  app.use(
+    '/graphql',
+    express.json(),
+    expressMiddleware(apolloServer, {
+      context: async ({ req, res }) => ({
+        ...buildPassportContext(req, res),
+        services: makeGqlServices(deps),
+        dataSources: deps.DataSources,
+      }),
+    }),
+  );
+
+  Object.entries(controllers).forEach(([_k, controller]) => {
+    controller.routes.forEach((it) => {
+      const handler = it.handler(deps);
+      const handlers = Array.isArray(handler) ? handler : [handler];
+      // If the route declares a bodySchema, validate the request body against
+      // it before any handler runs. Routes without a schema (e.g., GETs) skip
+      // validation entirely.
+      const middlewares = it.bodySchema
+        ? [createBodySchemaValidator(it.bodySchema), ...handlers]
+        : handlers;
+      app[it.method](path.join(controller.pathPrefix, it.path), ...middlewares);
     });
-
-    // catch 404 and forward to error handler
-    app.use(function (_req, _res, next) {
-      next(
-        makeNotFoundError('Requested route not found.', {
-          shouldErrorSpan: true,
-        }),
-      );
-    });
-
-    // error handler
-    app.use(async function (err, _req, res, _next) {
-      await deps.Tracer.addActiveSpan(
-        { resource: 'app', operation: 'handleError' },
-        async (span) => {
-          span.recordException(err);
-          span.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
-
-          // I don't know if these attributes are necessary, with recordException
-          span.setAttribute(SEMATTRS_EXCEPTION_MESSAGE, err.message);
-          if (err.stack) {
-            span.setAttribute(SEMATTRS_EXCEPTION_STACKTRACE, err.stack);
-          }
-          span.setAttribute(SEMATTRS_EXCEPTION_TYPE, err.name);
-
-          const errors = (() => {
-            if (err instanceof AggregateError) {
-              const extractedErrors = getErrorsFromAggregateError(err);
-              return isNonEmptyArray(extractedErrors) ? extractedErrors : [err];
-            } else {
-              return [err];
-            }
-          })() satisfies NonEmptyArray<unknown>;
-
-          // If we had any nested errors (from an AggregateError),
-          // attach those to the span too.
-          if (errors.length > 1 || errors[0] !== err) {
-            span.setAttribute(
-              'errors',
-              jsonStringify(
-                errors.map((it) => safePick(it, ['name', 'message', 'stack'])),
-              ),
-            );
-          }
-
-          // If we've already sent response headers or the response status code,
-          // we can't actually send a different status code here: it's an error
-          // in HTTP to send the headers portion of a response twice. So, we
-          // need to skip this step.
-          //
-          // This can happen, e.g., if we have a request handler that
-          // immediately responds with a 202/204 but then continues to do some
-          // processing work in the background, and that work errors.
-          if (!res.headersSent) {
-            const safeErrors = errors.map((it) =>
-              sanitizeError(it),
-            ) satisfies SerializableError[] as NonEmptyArray<SerializableError>;
-
-            res.status(pickStatus(safeErrors)).json({ errors: safeErrors });
-          }
-        },
-      );
-    } as ErrorRequestHandler);
   });
+
+  // catch 404 and forward to error handler
+  app.use(function (_req, _res, next) {
+    next(
+      makeNotFoundError('Requested route not found.', {
+        shouldErrorSpan: true,
+      }),
+    );
+  });
+
+  // error handler
+  app.use(async function (err, _req, res, _next) {
+    await deps.Tracer.addActiveSpan(
+      { resource: 'app', operation: 'handleError' },
+      async (span) => {
+        span.recordException(err);
+        span.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
+
+        // I don't know if these attributes are necessary, with recordException
+        span.setAttribute(ATTR_EXCEPTION_MESSAGE, err.message);
+        if (err.stack) {
+          span.setAttribute(ATTR_EXCEPTION_STACKTRACE, err.stack);
+        }
+        span.setAttribute(ATTR_EXCEPTION_TYPE, err.name);
+
+        const errors = (() => {
+          if (err instanceof AggregateError) {
+            const extractedErrors = getErrorsFromAggregateError(err);
+            return isNonEmptyArray(extractedErrors) ? extractedErrors : [err];
+          } else {
+            return [err];
+          }
+        })() satisfies NonEmptyArray<unknown>;
+
+        // If we had any nested errors (from an AggregateError),
+        // attach those to the span too.
+        if (errors.length > 1 || errors[0] !== err) {
+          span.setAttribute(
+            'errors',
+            jsonStringify(
+              errors.map((it) => safePick(it, ['name', 'message', 'stack'])),
+            ),
+          );
+        }
+
+        // If we've already sent response headers or the response status code,
+        // we can't actually send a different status code here: it's an error
+        // in HTTP to send the headers portion of a response twice. So, we
+        // need to skip this step.
+        //
+        // This can happen, e.g., if we have a request handler that
+        // immediately responds with a 202/204 but then continues to do some
+        // processing work in the background, and that work errors.
+        if (!res.headersSent) {
+          const safeErrors = errors.map((it) =>
+            sanitizeError(it),
+          ) satisfies SerializableError[] as NonEmptyArray<SerializableError>;
+
+          res.status(pickStatus(safeErrors)).json({ errors: safeErrors });
+        }
+      },
+    );
+  } as ErrorRequestHandler);
 
   return {
     app,
@@ -510,6 +420,7 @@ export default async function makeApiServer(deps: Dependencies) {
       await Promise.all([
         apolloServer.stop(),
         deps.closeSharedResourcesForShutdown(),
+        sessionStoreInstance.close(),
       ]);
     },
   };
@@ -536,7 +447,6 @@ function makeGqlServices(deps: Dependencies) {
       'PartialItemsService',
       'ReportingService',
       'RuleEvaluator',
-      'Sequelize',
       'SignalsService',
       'SigningKeyPairService',
       'Tracer',

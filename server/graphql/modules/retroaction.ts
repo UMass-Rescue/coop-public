@@ -1,11 +1,7 @@
-import { AuthenticationError, ForbiddenError } from 'apollo-server-express';
-
-import {
-  hasPermission,
-  UserPermission,
-} from '../../models/types/permissioning.js';
+import { UserPermission } from '../../services/userManagementService/index.js';
 import { type GQLMutationRunRetroactionArgs } from '../generated.js';
 import { type Context } from '../resolvers.js';
+import { forbiddenError, unauthenticatedError } from '../utils/errors.js';
 
 const typeDefs = /* GraphQL */ `
   type Mutation {
@@ -41,16 +37,20 @@ const resolvers = {
       // TODO: figure out an architecture/patterns for permission checks
       // and this type of validation. Make our error handling consistent.
       const user = context.getUser();
-      const rule = await context.services.Sequelize.Rule.findByPk(
-        params.input.ruleId,
-      );
-
       if (user == null) {
-        throw new AuthenticationError('Authenticated user required');
-      } else if (!hasPermission(UserPermission.RUN_RETROACTION, user.role)) {
-        throw new ForbiddenError('User not authorized to create backtests.');
-      } else if (!rule || user.orgId !== rule.orgId) {
-        throw new ForbiddenError('Invalid rule.');
+        throw unauthenticatedError('Authenticated user required');
+      }
+      if (!user.getPermissions().includes(UserPermission.RUN_RETROACTION)) {
+        throw forbiddenError('User not authorized to run retroaction.');
+      }
+
+      const rule =
+        await context.services.ModerationConfigService.getRuleByIdAndOrg(
+          params.input.ruleId,
+          user.orgId,
+        );
+      if (rule == null) {
+        throw forbiddenError('Invalid rule.');
       }
 
       return context.dataSources.ruleAPI.runRetroaction(params.input, user);

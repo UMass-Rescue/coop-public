@@ -89,7 +89,7 @@ export class Tree<T extends any> {
 
   size() {
     let size = 0;
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+
     for (const _ of this.preOrderTraversal()) {
       size++;
     }
@@ -248,7 +248,7 @@ export function multilevelListFromFlatList<
 
   // Initialize map with all nodes
   nodeList.forEach((node) => {
-    map.set(node.id, { ...node } as T & { children?: T[] });
+    map.set(node.id, { ...node });
   });
 
   // Build the tree

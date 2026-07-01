@@ -1,5 +1,3 @@
-import { DataSource } from 'apollo-datasource';
-
 import { inject, type Dependencies } from '../../iocContainer/index.js';
 import { type ItemSubmissionForGQL } from '../types.js';
 
@@ -8,12 +6,10 @@ export type UserHistoryForGQL = {
   user: ItemSubmissionForGQL;
 };
 
-class InvestigationAPI extends DataSource {
+class InvestigationAPI {
   constructor(
     private readonly itemHistoryQueries: Dependencies['ItemHistoryQueries'],
-  ) {
-    super();
-  }
+  ) {}
 
   async getItemHistory(opts: {
     itemId: string;

@@ -1,15 +1,15 @@
 import { ScalarTypes } from '@roostorg/types';
 
+import { makeSignalPermanentError } from '../../../../../utils/errors.js';
 import { type ItemInvestigationService } from '../../../../itemInvestigationService/index.js';
 import { type ItemSubmission } from '../../../../itemProcessingService/index.js';
-import { SignalType } from '../../../types/SignalType.js';
-import { SignalPricingStructure } from '../../../types/SignalPricingStructure.js';
-import SignalBase, { type SignalInput } from '../../SignalBase.js';
 import {
-  type SentinelService,
   SentinelServiceError,
+  type SentinelService,
 } from '../../../../sentinelService/index.js';
-import { makeSignalPermanentError } from '../../../../../utils/errors.js';
+import { SignalPricingStructure } from '../../../types/SignalPricingStructure.js';
+import { SignalType } from '../../../types/SignalType.js';
+import SignalBase, { type SignalInput } from '../../SignalBase.js';
 
 const SENTINEL_DOCS_URL = 'https://github.com/UMass-Rescue/Sentinel';
 
@@ -142,11 +142,12 @@ It compares submitted content against labeled positive (rare/harmful) and negati
     // signals that help Sentinel detect patterns spanning multiple messages.
     if (runtimeArgs?.threadIdentifier) {
       try {
-        const threadItems = this.itemInvestigationService.getThreadSubmissionsByTime({
-          orgId,
-          threadId: runtimeArgs.threadIdentifier,
-          limit: DEFAULT_THREAD_CONTEXT_LIMIT,
-        });
+        const threadItems =
+          this.itemInvestigationService.getThreadSubmissionsByTime({
+            orgId,
+            threadId: runtimeArgs.threadIdentifier,
+            limit: DEFAULT_THREAD_CONTEXT_LIMIT,
+          });
 
         for await (const { latestSubmission } of threadItems) {
           const itemText = extractTextFromSubmission(

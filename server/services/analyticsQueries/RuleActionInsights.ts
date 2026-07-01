@@ -2,33 +2,28 @@
 import { sql, type Kysely } from 'kysely';
 import { match } from 'ts-pattern';
 
-import { formatClickhouseQuery } from '../../plugins/warehouse/utils/clickhouseSql.js';
 import { type Dependencies } from '../../iocContainer/index.js';
 import { inject } from '../../iocContainer/utils.js';
-import type { ConditionWithResult } from '../../models/rules/RuleModel.js';
+import { formatClickhouseQuery } from '../../plugins/warehouse/utils/clickhouseSql.js';
 import { type RuleEnvironment } from '../../rule_engine/RuleEngine.js';
 import { type NormalizedItemData } from '../../services/itemProcessingService/index.js';
+import { type ConditionWithResult } from '../../services/moderationConfigService/index.js';
 import {
   BuiltInThirdPartySignalType,
+  integrationForSignalType,
   SignalType,
   UserCreatedExternalSignalType,
-  integrationForSignalType,
   type Integration,
 } from '../../services/signalsService/index.js';
-import { jsonParse, type JsonOf } from '../../utils/encoding.js';
-import {
-  type Excluding,
-  type FixSingleTableReturnedRowType,
-} from '../../utils/kysely.js';
-import { getUtcDateOnlyString, YEAR_MS } from '../../utils/time.js';
-import { type ConditionSetWithResultAsLogged } from '../analyticsLoggers/ruleExecutionLoggingUtils.js';
 import {
   warehouseDateToDate,
   warehouseDateToDateOnlyString,
-  type RuleExecutionsRow,
-  type WarehouseDate,
   type DataWarehousePublicSchema,
+  type WarehouseDate,
 } from '../../storage/dataWarehouse/warehouseSchema.js';
+import { jsonParse, type JsonOf } from '../../utils/encoding.js';
+import { getUtcDateOnlyString, YEAR_MS } from '../../utils/time.js';
+import { type ConditionSetWithResultAsLogged } from '../analyticsLoggers/ruleExecutionLoggingUtils.js';
 
 type RulePassSample = {
   date: Date;
@@ -38,6 +33,7 @@ type RulePassSample = {
   itemTypeName: string;
   itemTypeId: string;
   userId: string | null;
+  userTypeId: string | null;
   content: JsonOf<NormalizedItemData> | undefined;
   environment: RuleEnvironment;
   policyIds: readonly string[];
@@ -291,13 +287,21 @@ class RuleActionInsights {
       )
       .exhaustive();
 
-    // Cast to this; justified by where clause on ITEM_DATA above.
-    type ResultRow = FixSingleTableReturnedRowType<
-      typeof finalQuery,
-      Excluding<RuleExecutionsRow, 'ITEM_DATA', null>
-    >;
+    type ResultRow = {
+      date: WarehouseDate;
+      ts: WarehouseDate;
+      result: JsonOf<ConditionSetWithResultAsLogged> | null;
+      contentId: string;
+      itemTypeName: string;
+      itemTypeId: string;
+      userId: string | null;
+      userTypeId: string | null;
+      content: JsonOf<NormalizedItemData>;
+      environment: RuleEnvironment;
+      policyIds: readonly string[];
+    };
 
-    return (await finalQuery.$narrowType<ResultRow>().execute()).map((it) => ({
+    return (await finalQuery.$castTo<ResultRow>().execute()).map((it) => ({
       ...it,
       date: warehouseDateToDate(it.date),
       ts: warehouseDateToDate(it.ts),
@@ -407,7 +411,9 @@ class RuleActionInsights {
       ts: new Date(row.ts),
       result:
         row.result != null
-          ? jsonParse<JsonOf<ConditionSetWithResultAsLogged>>(row.result as JsonOf<ConditionSetWithResultAsLogged>)
+          ? jsonParse<JsonOf<ConditionSetWithResultAsLogged>>(
+              row.result as JsonOf<ConditionSetWithResultAsLogged>,
+            )
           : undefined,
       contentId: row.item_id,
       itemTypeName: row.item_type_name ?? '',

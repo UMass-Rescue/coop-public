@@ -5,18 +5,9 @@ import {
   type ItemIdentifier,
   type ScalarType,
   type TaggedScalar,
-} from '@roostorg/types';
+} from '@roostorg/coop-types';
 import { type ReadonlyDeep } from 'type-fest';
 
-import {
-  isTaggedItemData,
-  type TaggedItemData,
-} from '../models/rules/item-type-fields.js';
-import {
-  ConditionCompletionOutcome,
-  ConditionFailureOutcome,
-  type ConditionResult,
-} from '../models/rules/RuleModel.js';
 import {
   getUserFromRuleInput,
   isFullSubmission,
@@ -31,11 +22,16 @@ import {
   type ItemSubmission,
 } from '../services/itemProcessingService/index.js';
 import {
+  ConditionCompletionOutcome,
+  ConditionFailureOutcome,
   CoopInput,
+  isTaggedItemData,
   ValueComparator,
   type ConditionInput,
+  type ConditionResult,
   type ConditionSignalInfo,
   type LeafCondition,
+  type TaggedItemData,
 } from '../services/moderationConfigService/index.js';
 import {
   isSignalErrorResult,
@@ -122,13 +118,11 @@ export async function runLeafCondition(
   const { input: conditionInput, signal } = condition;
   const { input: ruleInput } = evaluationContext;
 
-
   // Figure out what data we're going to extract to pass to the signal.
   const selectedValueOrValues = await (conditionInput.type !==
   'CONTENT_DERIVED_FIELD'
     ? getSignalInputValueOrValues(conditionInput, ruleInput)
     : evaluationContext.getDerivedFieldValue(conditionInput.spec));
-
 
   // We got an error computing the value for a derived field.
   if (isCoopError(selectedValueOrValues)) {
@@ -165,7 +159,6 @@ export async function runLeafCondition(
       ? selectedValueOrValues
       : [selectedValueOrValues];
 
-
   // Now, transform the extracted content values by running them through the
   // signal. If the signal is null, we just treat it as the identity function
   // and leave the extracted values as-is. (A null/identity signal often happens
@@ -191,27 +184,32 @@ export async function runLeafCondition(
               ? ruleInput.data['spectrum-context-id']
                 ? String(ruleInput.data['spectrum-context-id'])
                 : ruleInput.data['spectrum_context_id']
-                ? String(ruleInput.data['spectrum_context_id'])
-                : ruleInput.itemType.kind === 'CONTENT'
-                ? getFieldValueForRole(
-                    ruleInput.itemType.schema,
-                    ruleInput.itemType.schemaFieldRoles,
-                    'threadId',
-                    ruleInput.data,
-                  )?.id
-                : undefined
+                  ? String(ruleInput.data['spectrum_context_id'])
+                  : ruleInput.itemType.kind === 'CONTENT'
+                    ? getFieldValueForRole(
+                        ruleInput.itemType.schema,
+                        ruleInput.itemType.schemaFieldRoles,
+                        'threadId',
+                        ruleInput.data,
+                      )?.id
+                    : undefined
               : undefined,
             contentType: isFullSubmission(ruleInput)
               ? ruleInput.itemType.name
               : undefined,
             args: signal.args,
             runtimeArgs: isFullSubmission(ruleInput)
-              ? await getSignalRuntimeArgs(evaluationContext, ruleInput, signal, conditionInput)
+              ? await getSignalRuntimeArgs(
+                  evaluationContext,
+                  ruleInput,
+                  signal,
+                  conditionInput,
+                )
               : undefined,
           });
         }),
       )
-    : signalInputValues.map((it): SignalResult<any> => {
+    : signalInputValues.map((it): SignalResult<SignalOutputType> => {
         // If the condition specified no signal, then we should act as though
         // the "identity" signal was used; i.e., the value that the condition
         // picked out (with `condition.input`) should be returned as-is.
@@ -267,7 +265,7 @@ export async function runLeafCondition(
               it.score,
               condition.threshold,
               condition.comparator,
-              it.outputType as SignalOutputType,
+              it.outputType,
             )
           : (it as SignalResult<{ scalarType: ScalarTypes['BOOLEAN'] }>).score,
       ),
@@ -462,7 +460,7 @@ export function extractContentValueOrValues(
             schemaFields.filter(
               (it) => getScalarType(it) === ScalarTypes.IMAGE,
             ),
-          ) as TaggedScalar<ScalarTypes['IMAGE']>[];
+          );
 
         case CoopInput.ANY_GEOHASH:
           return getValuesFromFields(
@@ -470,7 +468,7 @@ export function extractContentValueOrValues(
             schemaFields.filter(
               (it) => getScalarType(it) === ScalarTypes.GEOHASH,
             ),
-          ) as TaggedScalar<ScalarTypes['GEOHASH']>[];
+          );
 
         case CoopInput.ANY_VIDEO:
           return getValuesFromFields(
@@ -478,7 +476,7 @@ export function extractContentValueOrValues(
             schemaFields.filter(
               (it) => getScalarType(it) === ScalarTypes.VIDEO,
             ),
-          ) as TaggedScalar<ScalarTypes['VIDEO']>[];
+          );
 
         case CoopInput.POLICY_ID:
         case CoopInput.SOURCE:

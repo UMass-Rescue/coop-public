@@ -1,20 +1,18 @@
 import _ from 'lodash';
 import { type ReadonlyDeep } from 'type-fest';
 
-import {
-  ConditionCompletionOutcome,
-  ConditionFailureOutcome,
-  type ConditionOutcome,
-  type ConditionSetWithResult,
-  type ConditionWithResult,
-  type LeafConditionWithResult,
-} from '../models/rules/RuleModel.js';
 import { type RuleEvaluationContext } from '../rule_engine/RuleEvaluator.js';
 import { type AggregationClause } from '../services/aggregationsService/index.js';
 import {
+  ConditionCompletionOutcome,
   ConditionConjunction,
+  ConditionFailureOutcome,
+  type ConditionOutcome,
   type ConditionSet,
+  type ConditionSetWithResult,
+  type ConditionWithResult,
   type LeafCondition,
+  type LeafConditionWithResult,
 } from '../services/moderationConfigService/index.js';
 import { equalLengthZip } from '../utils/fp-helpers.js';
 import { assertUnreachable } from '../utils/misc.js';
@@ -71,12 +69,19 @@ export async function getConditionSetResults(
   runLeafCondition = defaultRunLeafCondition,
 ): Promise<Required<ConditionSetWithResult>> {
   const { conjunction } = conditionSet;
-  const result: ConditionSetWithResult = {
-    conjunction,
-    conditions: [] as unknown as
-      | NonEmptyArray<LeafConditionWithResult>
-      | NonEmptyArray<ConditionSetWithResult>,
-  };
+  // We collect mixed condition results during the loop, then narrow back to
+  // the public "ConditionSetWithResult.conditions" shape at return time. The
+  // public type is a discriminated union of "all leaves" or "all sets", which
+  // can't be safely pushed into; the array's runtime contents stay uniform
+  // because the input "conditionSet.conditions" is uniform.
+  //
+  // The element type is "ReadonlyDeep<...>" here because the inputs we push
+  // come from "ReadonlyDeep<ConditionSet>". We cast back to the mutable
+  // shape at the return site below; the cast is sound because the data is
+  // freshly built and never mutated by callers.
+  const conditionsWithResult: Array<
+    ReadonlyDeep<LeafConditionWithResult | ConditionSetWithResult>
+  > = [];
 
   // The conditions, sorted with lowest cost ones first.
   const getSignalCost = evaluationContext.getSignalCost.bind(evaluationContext);
@@ -101,17 +106,17 @@ export async function getConditionSetResults(
   // if we can determine it before evaluating all conditions.
   let finalOutcome: ConditionOutcome | undefined;
 
-  // This is basically mapping `conditions` to ConditionWithResult, and putting
-  // the mapped array in result.conditions. But we don't use `map` because we
-  // want to run the conditions in sequence (i.e., with an `await` on each loop
+  // This is basically mapping "conditions" to ConditionWithResult, and pushing
+  // them onto "conditionsWithResult". But we don't use "map" because we want to
+  // run the conditions in sequence (i.e., with an "await" on each loop
   // iteration), and map would run them in parallel.
   for (const condition of sortedConditions) {
     // If we already know the final outcome for the condition set, then we can
     // skip all subsequent conditions, and a condition that's skipped has an
     // identical representation for its ConditionWithResult, so we just push
-    // the skipped condition into result.conditions.
+    // the skipped condition through.
     if (finalOutcome !== undefined) {
-      result.conditions.push(condition as any);
+      conditionsWithResult.push(condition);
       continue;
     }
 
@@ -121,30 +126,28 @@ export async function getConditionSetResults(
         ? await getConditionSetResults(condition, evaluationContext, tracer)
         : {
             ...condition,
-            result: await runLeafCondition(
-              condition,
-              evaluationContext,
-              // eslint-disable-next-line no-loop-func
-            ).catch((e) => {
-              // If evaluating a condition fails, we're eventually going to want
-              // to retry before we give up but, for now, we just mark the result
-              // as failed and move on.
-              const activeSpan = tracer.getActiveSpan();
-              if (activeSpan?.isRecording()) {
-                activeSpan.recordException(e);
-              }
-              return { outcome: ConditionFailureOutcome.ERRORED };
-            }),
+            result: await runLeafCondition(condition, evaluationContext).catch(
+              (e) => {
+                // If evaluating a condition fails, we're eventually going to want
+                // to retry before we give up but, for now, we just mark the result
+                // as failed and move on.
+                const activeSpan = tracer.getActiveSpan();
+                if (activeSpan?.isRecording()) {
+                  activeSpan.recordException(e);
+                }
+                return { outcome: ConditionFailureOutcome.ERRORED };
+              },
+            ),
           };
 
-    result.conditions.push(conditionWithResult as any);
+    conditionsWithResult.push(conditionWithResult);
     // console.log('RESULT ' + conditionWithResult.result.outcome);
 
     // Attempt to determine the result for the whole condition set from the
     // outcomes so far. If we can, save that result to skip running each
     // condition for the rest of the loop
     const conditionSetOutcome = tryGetOutcomeFromPartialOutcomes(
-      result.conditions.map((c) => c.result!.outcome),
+      conditionsWithResult.map((c) => c.result!.outcome),
       conjunction,
     );
 
@@ -154,12 +157,13 @@ export async function getConditionSetResults(
   }
 
   return {
-    ...result,
+    conjunction,
+    conditions: conditionsWithResult as ConditionSetWithResult['conditions'],
     result: {
       outcome:
         finalOutcome ??
         getConditionSetOutcome(
-          result.conditions.map((c) => c.result!.outcome),
+          conditionsWithResult.map((c) => c.result!.outcome),
           conjunction,
         ),
     },
@@ -191,23 +195,23 @@ export function getConditionSetOutcome(
       return falseOutcomes && falseOutcomes.length > 0
         ? falseOutcomes[0]
         : nullOutcomes
-        ? nullOutcomes[0]
-        : ConditionCompletionOutcome.PASSED;
+          ? nullOutcomes[0]
+          : ConditionCompletionOutcome.PASSED;
     case ConditionConjunction.OR:
       // With OR, it's TRUE that swallows null (TRUE || NULL = TRUE), while
       // we have to propogate any NULLs when there's no true outcomes.
       return trueOutcomes && trueOutcomes.length > 0
         ? ConditionCompletionOutcome.PASSED
         : nullOutcomes
-        ? nullOutcomes[0]
-        : ConditionCompletionOutcome.FAILED;
+          ? nullOutcomes[0]
+          : ConditionCompletionOutcome.FAILED;
     case ConditionConjunction.XOR:
       // Similar to OR, but we must ensure there's one true with no NULLs.
       return trueOutcomes?.length === 1 && !nullOutcomes
         ? ConditionCompletionOutcome.PASSED
         : (!trueOutcomes || trueOutcomes.length === 1) && nullOutcomes
-        ? nullOutcomes[0]
-        : ConditionCompletionOutcome.FAILED;
+          ? nullOutcomes[0]
+          : ConditionCompletionOutcome.FAILED;
     default:
       return assertUnreachable(conjunction);
   }
@@ -266,8 +270,7 @@ export function getAllAggregationsInConditionSet(
       return getAllAggregationsInConditionSet(condition);
     }
     const sig = condition.signal;
-    const args =
-      sig?.type === 'AGGREGATION' ? sig.args : undefined;
+    const args = sig?.type === 'AGGREGATION' ? sig.args : undefined;
     return args != null ? [args.aggregationClause] : [];
   });
 }

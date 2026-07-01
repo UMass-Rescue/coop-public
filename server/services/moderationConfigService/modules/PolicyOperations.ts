@@ -3,10 +3,6 @@ import { type Writable } from 'type-fest';
 import { uid } from 'uid';
 
 import {
-  UserPermission,
-  type Invoker,
-} from '../../../models/types/permissioning.js';
-import {
   CoopError,
   ErrorType,
   makeUnauthorizedError,
@@ -15,9 +11,12 @@ import {
 import {
   isUniqueViolationError,
   type FixKyselyRowCorrelation,
-  type FixSingleTableReturnedRowType,
 } from '../../../utils/kysely.js';
 import { removeUndefinedKeys } from '../../../utils/misc.js';
+import {
+  UserPermission,
+  type Invoker,
+} from '../../userManagementService/index.js';
 import { type ModerationConfigServicePg } from '../dbTypes.js';
 import { type Policy } from '../index.js';
 import type { PolicyType } from '../types/policies.js';
@@ -36,7 +35,25 @@ const policyDbSelection = [
   'semantic_version as semanticVersion',
   'user_strike_count as userStrikeCount',
   'apply_user_strike_count_config_to_children as applyUserStrikeCountConfigToChildren',
-  'penalty', // TODO: remove
+  'penalty',
+] as const;
+
+const policyJoinDbSelection = [
+  'rap.rule_id as ruleId',
+  'p.id',
+  'p.name',
+  'p.org_id as orgId',
+  'p.parent_id as parentId',
+  'p.created_at as createdAt',
+  'p.updated_at as updatedAt',
+  'p.policy_text as policyText',
+  'p.enforcement_guidelines as enforcementGuidelines',
+  'p.sys_period as sysPeriod',
+  'p.policy_type as policyType',
+  'p.semantic_version as semanticVersion',
+  'p.user_strike_count as userStrikeCount',
+  'p.apply_user_strike_count_config_to_children as applyUserStrikeCountConfigToChildren',
+  'p.penalty',
 ] as const;
 
 type PolicyDbResult = FixKyselyRowCorrelation<
@@ -61,11 +78,55 @@ export default class PolicyOperations {
       .selectFrom('public.policies')
       .select(policyDbSelection)
       .where('org_id', '=', orgId);
-    const results = (await query.execute()) as FixSingleTableReturnedRowType<
-      typeof query
-    >[];
+    const results = (await query.execute()) as PolicyDbResult[];
 
     return results.map((it) => this.#dbResultToPolicy(it));
+  }
+
+  async getPoliciesByIds(opts: {
+    orgId: string;
+    ids: readonly string[];
+    readFromReplica?: boolean;
+  }): Promise<Policy[]> {
+    const { orgId, ids, readFromReplica } = opts;
+    if (ids.length === 0) {
+      return [];
+    }
+    const pgQuery = this.#getPgQuery(readFromReplica ?? true);
+    const results = (await pgQuery
+      .selectFrom('public.policies')
+      .select(policyDbSelection)
+      .where('org_id', '=', orgId)
+      .where('id', 'in', [...ids])
+      .execute()) as PolicyDbResult[];
+
+    return results.map((it) => this.#dbResultToPolicy(it));
+  }
+
+  async getPoliciesByRuleIds(opts: {
+    ruleIds: readonly string[];
+    readFromReplica?: boolean;
+  }): Promise<Record<string, Policy[]>> {
+    const { ruleIds, readFromReplica } = opts;
+    if (ruleIds.length === 0) {
+      return {};
+    }
+    const pgQuery = this.#getPgQuery(readFromReplica ?? true);
+    type Row = PolicyDbResult & { ruleId: string };
+    const rows = (await pgQuery
+      .selectFrom('public.rules_and_policies as rap')
+      .innerJoin('public.policies as p', 'p.id', 'rap.policy_id')
+      .select(policyJoinDbSelection)
+      .where('rap.rule_id', 'in', [...ruleIds])
+      .execute()) as Row[];
+
+    const out: Record<string, Policy[]> = {};
+    for (const row of rows) {
+      const { ruleId, ...policyFields } = row;
+      const policy = this.#dbResultToPolicy(policyFields);
+      (out[ruleId] ??= []).push(policy);
+    }
+    return out;
   }
 
   async getPolicy(opts: {
@@ -80,10 +141,7 @@ export default class PolicyOperations {
       .select(policyDbSelection)
       .where('org_id', '=', orgId)
       .where('id', '=', policyId);
-    const result =
-      (await query.executeTakeFirst()) as FixSingleTableReturnedRowType<
-        typeof query
-      >;
+    const result = (await query.executeTakeFirst()) as PolicyDbResult;
 
     return this.#dbResultToPolicy(result);
   }

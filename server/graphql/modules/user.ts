@@ -1,6 +1,6 @@
-import { AuthenticationError, ForbiddenError } from 'apollo-server-express';
 import jwt from 'jsonwebtoken';
 
+import { UserPermission } from '../../services/userManagementService/index.js';
 import {
   type GQLGetDecisionCountSettings,
   type GQLGetJobCreationCountSettings,
@@ -8,6 +8,7 @@ import {
   type GQLQueryResolvers,
   type GQLUserResolvers,
 } from '../generated.js';
+import { forbiddenError, unauthenticatedError } from '../utils/errors.js';
 import { gqlSuccessResult } from '../utils/gqlResult.js';
 
 const typeDefs = /* GraphQL */ `
@@ -36,6 +37,9 @@ const typeDefs = /* GraphQL */ `
     MANAGE_POLICIES
     VIEW_INVESTIGATION
     VIEW_RULES_DASHBOARD
+    MANAGE_ROLES
+    MANAGE_USERS
+    MANAGE_ROUTING_RULES
   }
 
   enum UserPenaltySeverity {
@@ -134,7 +138,7 @@ const typeDefs = /* GraphQL */ `
   }
 
   union ChangePasswordResponse =
-      ChangePasswordSuccessResponse
+    | ChangePasswordSuccessResponse
     | ChangePasswordError
 
   type Mutation {
@@ -187,7 +191,7 @@ const Query: GQLQueryResolvers = {
   async user(_, { id }, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('User required.');
+      throw unauthenticatedError('User required.');
     }
 
     const { orgId } = user;
@@ -199,7 +203,7 @@ const Mutation: GQLMutationResolvers = {
   async updateAccountInfo(_, params, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
     }
     await context.dataSources.userAPI.updateAccountInfo(user, params);
     return true; // TODO: return the updated user instead.
@@ -207,14 +211,21 @@ const Mutation: GQLMutationResolvers = {
   async changePassword(_, params, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
     }
-    return context.dataSources.userAPI.changePassword(user, params.input);
+    return context.dataSources.userAPI.changePassword(
+      user,
+      params.input,
+      context.req.sessionID,
+    );
   },
   async deleteUser(_, params, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
+    }
+    if (!user.getPermissions().includes(UserPermission.MANAGE_USERS)) {
+      throw forbiddenError('User does not have permission to delete users');
     }
 
     return context.dataSources.userAPI.deleteUser({
@@ -225,7 +236,7 @@ const Mutation: GQLMutationResolvers = {
   async addFavoriteRule(_, params, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('User required.');
+      throw unauthenticatedError('User required.');
     }
     await context.dataSources.userAPI.addFavoriteRule(
       user.id,
@@ -237,7 +248,7 @@ const Mutation: GQLMutationResolvers = {
   async removeFavoriteRule(_, params, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('User required.');
+      throw unauthenticatedError('User required.');
     }
     await context.dataSources.userAPI.removeFavoriteRule(
       user.id,
@@ -249,7 +260,7 @@ const Mutation: GQLMutationResolvers = {
   async addFavoriteMRTQueue(_, params, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('User required.');
+      throw unauthenticatedError('User required.');
     }
     await context.services.ManualReviewToolService.addFavoriteQueueForUser({
       userId: user.id,
@@ -261,7 +272,7 @@ const Mutation: GQLMutationResolvers = {
   async removeFavoriteMRTQueue(_, params, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('User required.');
+      throw unauthenticatedError('User required.');
     }
     await context.services.ManualReviewToolService.removeFavoriteQueueForUser({
       userId: user.id,
@@ -273,7 +284,7 @@ const Mutation: GQLMutationResolvers = {
   async setModeratorSafetySettings(_, params, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('User required.');
+      throw unauthenticatedError('User required.');
     }
     await context.services.UserManagementService.upsertUserInterfaceSettings({
       userId: user.id,
@@ -287,7 +298,7 @@ const Mutation: GQLMutationResolvers = {
   async setMrtChartConfigurationSettings(_, params, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('User required.');
+      throw unauthenticatedError('User required.');
     }
     await context.services.UserManagementService.upsertUserInterfaceSettings({
       userId: user.id,
@@ -342,16 +353,30 @@ const User: GQLUserResolvers = {
     try {
       const authedUser = getUser();
       if (!authedUser || user.id !== authedUser.id) {
-        throw new ForbiddenError('Must be signed in as this user to read JWT.');
+        throw forbiddenError('Must be signed in as this user to read JWT.');
       }
 
       const { email, firstName, lastName, orgId } = user;
       const name = `${firstName} ${lastName}`;
-      const [apiKeyRes, publicSigningKey] = await Promise.all([
-        dataSources.orgAPI.getActivatedApiKeyForOrg(orgId),
-        dataSources.orgAPI.getPublicSigningKeyPem(orgId),
-      ]);
-      const apiKey = apiKeyRes === false ? null : apiKeyRes.key;
+
+      // The ReadMe JWT can include the org's API key and webhook signing key
+      // so docs can prefill them — but only for users who are already
+      // entitled to see those secrets via the normal MANAGE_ORG-gated
+      // surfaces. Otherwise, decoding the JWT would leak org secrets to any
+      // authenticated user.
+      const canSeeOrgSecrets = authedUser
+        .getPermissions()
+        .includes(UserPermission.MANAGE_ORG);
+      let apiKey: string | null = null;
+      let publicSigningKey: string | null = null;
+      if (canSeeOrgSecrets) {
+        const [apiKeyRes, signingKey] = await Promise.all([
+          dataSources.orgAPI.getActivatedApiKeyForOrg(orgId),
+          dataSources.orgAPI.getPublicSigningKeyPem(orgId),
+        ]);
+        apiKey = apiKeyRes === false ? null : apiKeyRes.key;
+        publicSigningKey = signingKey;
+      }
 
       return jwt.sign(
         { name, email, apiKey, publicSigningKey },
@@ -393,7 +418,7 @@ const User: GQLUserResolvers = {
   async reviewableQueues(_, { queueIds }, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
     }
 
     const queues =

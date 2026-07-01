@@ -2,32 +2,38 @@
 import { createRequire } from 'module';
 import Bottle from '@ethanresnick/bottlejs';
 import opentelemetry from '@opentelemetry/api';
-import { makeDateString, type ItemIdentifier } from '@roostorg/types';
-import { types as scyllaTypes } from 'cassandra-driver';
-import IORedis, { type Cluster } from 'ioredis';
-import * as knexPkg from 'knex';
-import { type Knex } from 'knex';
+import { type ItemIdentifier } from '@roostorg/coop-types';
 import {
-  Kysely,
-  PostgresDialect,
-  type PostgresCursorConstructor,
-} from 'kysely';
+  types as scyllaTypes,
+  type Host as ScyllaHost,
+} from 'cassandra-driver';
+import IORedis, { type Cluster } from 'ioredis';
+import { Kysely, PostgresDialect } from 'kysely';
 import _ from 'lodash';
 import { DynamicPool } from 'node-worker-threads-pool';
-import pg from 'pg';
+import type pg from 'pg';
 import Cursor from 'pg-cursor';
 import { type JsonObject, type ReadonlyDeep } from 'type-fest';
 import { v1 as uuidv1 } from 'uuid';
 
-import makeDb from '../models/index.js';
+import type { IActionExecutionsAdapter } from '../plugins/warehouse/queries/IActionExecutionsAdapter.js';
+import type { IActionStatisticsAdapter } from '../plugins/warehouse/queries/IActionStatisticsAdapter.js';
+import type { IContentApiRequestsAdapter } from '../plugins/warehouse/queries/IContentApiRequestsAdapter.js';
 import {
+  ClickhouseActionExecutionsAdapter,
+  ClickhouseActionStatisticsAdapter,
+  ClickhouseContentApiRequestsAdapter,
+  ClickhouseOrgCreationAdapter,
+  ClickhouseReportingAnalyticsAdapter,
+} from '../plugins/warehouse/queries/index.js';
+import type { IOrgCreationAdapter } from '../plugins/warehouse/queries/IOrgCreationAdapter.js';
+import type { IReportingAnalyticsAdapter } from '../plugins/warehouse/queries/IReportingAnalyticsAdapter.js';
+import {
+  ITEM_SUBMISSION_DLQ_NAME,
+  ITEM_SUBMISSION_QUEUE_NAME,
   makeItemSubmissionBulkWrite,
   type ItemSubmissionBulkWrite,
-  ITEM_SUBMISSION_QUEUE_NAME,
-  ITEM_SUBMISSION_DLQ_NAME,
 } from '../queues/itemSubmissionQueue.js';
-import { type PolicyActionPenalties } from '../models/OrgModel.js';
-import { type HashBank, HashBankService } from '../services/hmaService/index.js';
 import makeActionPublisher, {
   type ActionPublisher,
   type ActionTargetItem,
@@ -39,7 +45,6 @@ import {
   makeGetItemTypesForOrgEventuallyConsistent,
   makeGetLocationBankLocationsEventuallyConsistent,
   makeGetPoliciesForRulesEventuallyConsistent,
-  makeGetSequelizeItemTypeEventuallyConsistent,
   makeGetTextBankStringsEventuallyConsistent,
   makeRecordRuleActionLimitUsage,
   type GetActionsForRuleEventuallyConsistent,
@@ -47,7 +52,6 @@ import {
   type GetItemTypesForOrgEventuallyConsistent,
   type GetLocationBankLocationsBankEventuallyConsistent,
   type GetPoliciesForRulesEventuallyConsistent,
-  type GetSequelizeItemTypeEventuallyConsistent,
   type GetTextBankStringsEventuallyConsistent,
   type RecordRuleActionLimitUsage,
 } from '../rule_engine/ruleEngineQueries.js';
@@ -66,23 +70,50 @@ import {
   type StringNumberKeyValueStore,
 } from '../services/aggregationsService/index.js';
 import {
+  makeActionExecutionLogger,
+  makeContentApiLogger,
+  makeItemModelScoreLogger,
+  makeOrgCreationLogger,
+  makeReportingRuleExecutionLogger,
+  makeRoutingRuleExecutionLogger,
+  makeRuleExecutionLogger,
+  type ActionExecutionLogger,
+  type ContentApiLogger,
+  type ItemModelScoreLogger,
+  type OrgCreationLogger,
+  type ReportingRuleExecutionLogger,
+  type RoutingRuleExecutionLogger,
+  type RuleExecutionLogger,
+} from '../services/analyticsLoggers/index.js';
+import {
+  makeItemHistoryQueries,
+  makeRuleActionInsights,
+  makeUserHistoryQueries,
+  type ItemHistoryQueries,
+  type RuleActionInsights,
+  type UserHistoryQueries,
+} from '../services/analyticsQueries/index.js';
+import {
   makeApiKeyService,
   type ApiKeyService,
 } from '../services/apiKeyService/index.js';
-import makeHmaService from '../services/hmaService/index.js';
 import { type CombinedPg } from '../services/combinedDbTypes.js';
 import {
   makeDerivedFieldsService,
   type DerivedFieldsService,
 } from '../services/derivedFieldsService/index.js';
+import makeHmaService, {
+  HashBankService,
+  type HashBank,
+} from '../services/hmaService/index.js';
 import { ItemInvestigationService } from '../services/itemInvestigationService/index.js';
 import {
-  getFieldValueForRole,
   itemSubmissionWithTypeIdentifierToItemSubmission,
   type ItemSubmissionWithTypeIdentifier,
   type NormalizedItemData,
 } from '../services/itemProcessingService/index.js';
 import {
+  isReportJob,
   ManualReviewToolService,
   type ManualReviewAppealJobInput,
   type ManualReviewJobInput,
@@ -109,8 +140,8 @@ import {
   // eslint-disable-next-line import/no-restricted-paths
 } from '../services/moderationConfigService/moderationConfigServiceQueries.js';
 import {
+  buildSubmitReportParamsFromDecision,
   makeNcmecService,
-  ncmecProdQueues,
   type NcmecService,
 } from '../services/ncmecService/index.js';
 import {
@@ -137,6 +168,10 @@ import {
   type PlacesApiService,
 } from '../services/placesApiService/index.js';
 import {
+  getPolicyActionPenaltiesForOrg,
+  type PolicyActionPenalties,
+} from '../services/policyActionPenalties.js';
+import {
   makeReportingService,
   type ReportingService,
 } from '../services/reportingService/index.js';
@@ -158,7 +193,6 @@ import makeSendEmail, {
 } from '../services/sendEmailService/index.js';
 import {
   makeSignalAuthService,
-
   type SignalAuthService,
 } from '../services/signalAuthService/index.js';
 import {
@@ -184,56 +218,21 @@ import {
   type UserScore,
 } from '../services/userStatisticsService/index.js';
 import { UserStrikeService } from '../services/userStrikeService/index.js';
-import {
-  makeActionExecutionLogger,
-  makeContentApiLogger,
-  makeItemModelScoreLogger,
-  makeOrgCreationLogger,
-  makeReportingRuleExecutionLogger,
-  makeRoutingRuleExecutionLogger,
-  makeRuleExecutionLogger,
-  type ActionExecutionLogger,
-  type ContentApiLogger,
-  type ItemModelScoreLogger,
-  type OrgCreationLogger,
-  type ReportingRuleExecutionLogger,
-  type RoutingRuleExecutionLogger,
-  type RuleExecutionLogger,
-} from '../services/analyticsLoggers/index.js';
-import {
-  makeItemHistoryQueries,
-  makeRuleActionInsights,
-  makeUserHistoryQueries,
-  type ItemHistoryQueries,
-  type RuleActionInsights,
-  type UserHistoryQueries,
-} from '../services/analyticsQueries/index.js';
+import type { IDataWarehouseAnalytics } from '../storage/dataWarehouse/IDataWarehouseAnalytics.js';
 import {
   DataWarehouseFactory,
   type IDataWarehouse,
   type IDataWarehouseDialect,
 } from '../storage/dataWarehouse/index.js';
-import type { IDataWarehouseAnalytics } from '../storage/dataWarehouse/IDataWarehouseAnalytics.js';
-import {
-  ClickhouseActionStatisticsAdapter,
-  ClickhouseReportingAnalyticsAdapter,
-  ClickhouseActionExecutionsAdapter,
-  ClickhouseContentApiRequestsAdapter,
-  ClickhouseOrgCreationAdapter,
-} from '../plugins/warehouse/queries/index.js';
-import type { IActionStatisticsAdapter } from '../plugins/warehouse/queries/IActionStatisticsAdapter.js';
-import type { IReportingAnalyticsAdapter } from '../plugins/warehouse/queries/IReportingAnalyticsAdapter.js';
-import type { IActionExecutionsAdapter } from '../plugins/warehouse/queries/IActionExecutionsAdapter.js';
-import type { IContentApiRequestsAdapter } from '../plugins/warehouse/queries/IContentApiRequestsAdapter.js';
-import type { IOrgCreationAdapter } from '../plugins/warehouse/queries/IOrgCreationAdapter.js';
 import { cached, type Cached } from '../utils/caching.js';
+import { CoopMeter } from '../utils/CoopMeter.js';
 import {
   toCorrelationId,
   type CorrelationId,
 } from '../utils/correlationIds.js';
-import { CoopMeter } from '../utils/CoopMeter.js';
 import { getUsableCoreCount } from '../utils/cpu-helpers.js';
 import { jsonStringify, type JsonOf } from '../utils/encoding.js';
+import { logErrorJson, logJson } from '../utils/logging.js';
 import { __throw, assertUnreachable } from '../utils/misc.js';
 import SafeTracer from '../utils/SafeTracer.js';
 import {
@@ -242,9 +241,15 @@ import {
   type NonEmptyArray,
   type Satisfies,
 } from '../utils/typescript-types.js';
+import { createPgPool } from './createPgPool.js';
 import { registerGqlDataSources } from './services/gqlDataSources.js';
 import { registerWorkersAndJobs } from './services/workersAndJobs.js';
-import { register, safeGetEnvVar } from './utils.js';
+import {
+  isEnvTrue,
+  register,
+  safeGetEnvNonNegativeInt,
+  safeGetEnvVar,
+} from './utils.js';
 
 // the otel instrumentation currently intercepts require statements. support for
 // esm support is experimental so we should wait until it is stable
@@ -306,20 +311,19 @@ export interface Dependencies {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   KyselyPgReadReplica: Kysely<any>;
 
+  // The shared master `pg.Pool` that `KyselyPg` is built on. Exposed so
+  // non-Kysely Postgres consumers (e.g., the express-session store) can
+  // share the same pool instead of opening their own.
+  KyselyPgPool: pg.Pool;
+
   // Similar to our Kysely services, we register the services as Scylla<any> so
   // that each dependent service can type its arg more specifically with the set
   // of tables it is responsible for / allowed to query.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  Scylla: Scylla<any> & { close: () => Promise<void> };
-
-  Sequelize: ReturnType<typeof makeDb>;
-  OrgModel: ReturnType<typeof makeDb>['Org'];
-  RuleModel: ReturnType<typeof makeDb>['Rule'];
-  ActionModel: ReturnType<typeof makeDb>['Action'];
-  PolicyModel: ReturnType<typeof makeDb>['Policy'];
-  ItemTypeModel: ReturnType<typeof makeDb>['ItemType'];
-  LocationBankModel: ReturnType<typeof makeDb>['LocationBank'];
-  LocationBankLocationModel: ReturnType<typeof makeDb>['LocationBankLocation'];
+  Scylla: Scylla<any> & {
+    connect: () => Promise<void>;
+    close: () => Promise<void>;
+  };
 
   // Data Warehouse abstraction
   DataWarehouse: IDataWarehouse;
@@ -333,8 +337,14 @@ export interface Dependencies {
 
   itemSubmissionQueueBulkWrite: ItemSubmissionBulkWrite;
   itemSubmissionRetryQueueBulkWrite: ItemSubmissionBulkWrite;
-  Knex: Knex;
   IORedis: IORedis.Redis | Cluster;
+  /**
+   * Dedicated ioredis client for the items-async enqueue path. Same Redis
+   * as `IORedis`, but built with `enableOfflineQueue: false` so a
+   * `queue.addBulk` while Redis is unreachable rejects immediately
+   * instead of buffering in-process
+   */
+  IORedisEnqueueNoBuffer: IORedis.Redis | Cluster;
 
   // Loggers
   RuleExecutionLogger: RuleExecutionLogger;
@@ -396,7 +406,6 @@ export interface Dependencies {
     (input: { orgId: string; bankId: string }) => Promise<HashBank | null>
   >;
 
-  getSequelizeItemTypeEventuallyConsistent: GetSequelizeItemTypeEventuallyConsistent;
   getItemTypesForOrgEventuallyConsistent: GetItemTypesForOrgEventuallyConsistent;
   getItemTypeEventuallyConsistent: GetItemTypeEventuallyConsistent;
   getEnabledRulesForItemTypeEventuallyConsistent: GetEnabledRulesForItemTypeEventuallyConsistent;
@@ -433,6 +442,17 @@ export interface Dependencies {
 // treatment that TS gives to classes with private fields; see https://stackoverflow.com/questions/55281162/can-i-force-the-typescript-compiler-to-use-nominal-typing)
 export type PublicInterface<T extends object> = { [K in keyof T]: T[K] };
 
+export function getPgConnectionParams(): pg.ClientConfig {
+  return {
+    user: process.env.DATABASE_USER ?? 'postgres',
+    database: process.env.DATABASE_NAME ?? 'development',
+    password: safeGetEnvVar('DATABASE_PASSWORD'),
+    port: parseInt(process.env.DATABASE_PORT ?? '5432'),
+    host: safeGetEnvVar('DATABASE_HOST'),
+    ssl: isEnvTrue('DATABASE_SSL') ? { rejectUnauthorized: false } : undefined,
+  };
+}
+
 /**
  * A function for creating our service container, configured for production.
  * Services can be rebound in other contexts (namely, tests) as needed.
@@ -440,6 +460,62 @@ export type PublicInterface<T extends object> = { [K in keyof T]: T[K] };
  * copies of the container as needed for selective rebinding.
  */
 export default async function getBottle() {
+  // Pool / client tuning shared by both Kysely pools. Defaults preserve our
+  // pre-Kysely behavior; env var names are generic.
+  const getPgPoolTuning = () => {
+    const statementTimeoutMs =
+      process.env.DATABASE_STATEMENT_TIMEOUT_MS?.trim();
+    const keepAliveInitialDelayMs =
+      process.env.DATABASE_KEEPALIVE_INITIAL_DELAY_MS?.trim();
+    return {
+      // pg's default is 10s, which churns connections during quiet periods.
+      idleTimeoutMillis: safeGetEnvNonNegativeInt(
+        'DATABASE_POOL_IDLE_TIMEOUT_MS',
+        300000,
+      ),
+      // pg's default is 0 (wait forever); fail fast if the db is unreachable.
+      connectionTimeoutMillis: safeGetEnvNonNegativeInt(
+        'DATABASE_POOL_CONNECTION_TIMEOUT_MS',
+        15000,
+      ),
+      // Client-side bound on long-running queries.
+      query_timeout: safeGetEnvNonNegativeInt(
+        'DATABASE_QUERY_TIMEOUT_MS',
+        1000000,
+      ),
+      // Optional server-side bound; defense in depth alongside `query_timeout`.
+      // Unset => Postgres' own default (no limit).
+      ...(statementTimeoutMs && {
+        statement_timeout: safeGetEnvNonNegativeInt(
+          'DATABASE_STATEMENT_TIMEOUT_MS',
+          0,
+        ),
+      }),
+      // Kill sessions sitting idle inside an open transaction (holding locks).
+      idle_in_transaction_session_timeout: safeGetEnvNonNegativeInt(
+        'DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS',
+        300000,
+      ),
+      // Recycle each client after N seconds to dodge stale connections.
+      // 0 = never expire (default).
+      maxLifetimeSeconds: safeGetEnvNonNegativeInt(
+        'DATABASE_POOL_MAX_LIFETIME_SECONDS',
+        0,
+      ),
+      // TCP keepalive surfaces NAT/LB connection drops as pool errors
+      // (handled by `createPgPool`) rather than as hung queries. Defaults on;
+      // set DATABASE_KEEPALIVE=false to disable.
+      keepAlive:
+        process.env.DATABASE_KEEPALIVE?.trim().toLowerCase() !== 'false',
+      ...(keepAliveInitialDelayMs && {
+        keepAliveInitialDelayMillis: safeGetEnvNonNegativeInt(
+          'DATABASE_KEEPALIVE_INITIAL_DELAY_MS',
+          0,
+        ),
+      }),
+    };
+  };
+
   // NB: this is a function because safeGetEnvVar can throw, so we only want to
   // try to look up the env vars (and throw if they're missing) _if someone
   // actually tries to fetch a service from bottle that needs these env vars_.
@@ -450,38 +526,47 @@ export default async function getBottle() {
   // that would defeat the ability of safeGetEnvVar to alert us in prod if a
   // worker that needs these vars is run without them.
   const getPgMasterConnectionInfo = () => ({
-    user: process.env.DATABASE_USER ?? 'postgres',
-    database: process.env.DATABASE_NAME ?? 'development',
-    password: safeGetEnvVar('DATABASE_PASSWORD'),
-    port: parseInt(process.env.DATABASE_PORT ?? '5432'),
-    host: safeGetEnvVar('DATABASE_HOST'),
-    max: 30,
+    ...getPgConnectionParams(),
+    max: parseInt(process.env.DATABASE_POOL_MAX ?? '30'),
     application_name:
       getEnvVarOrWarn('OTEL_SERVICE_NAME') ?? 'unknown-coop-service',
+    ...getPgPoolTuning(),
   });
+
+  // Kysely's default is `['error']`; opt-in to also logging every executed
+  // query (SQL, bound params, duration).
+  const kyselyLogLevels: ReadonlyArray<'query' | 'error'> = isEnvTrue(
+    'DATABASE_PRINT_LOGS',
+  )
+    ? ['query', 'error']
+    : ['error'];
 
   const bottle = new Bottle<Dependencies>();
 
   // Pg services.
   //
-  // - 'KyselyPg' is for issuing raw pg queries w/o sequelize (e.g., the queries
-  //   that some of the our "services" issue to pg, to the non-public schemas).
-  //   These queries go to our primary db, which accepts writes. Using knex for
-  //   query building is deprecated in favor of kysely, because the latter offers
-  //   better typings.
+  // - 'KyselyPgPool' is the shared `pg.Pool` for the primary (writable) db.
+  //   Non-Kysely Postgres consumers (e.g. the express-session store in
+  //   `api.ts`) inject this so every connection passes through `createPgPool`.
+  //
+  // - 'KyselyPg' is the primary Kysely instance used across services for typed
+  //   pg queries. These queries go to our primary db, which accepts writes.
   //
   // - KyselyPgReadReplica gives us the same type safety, but sends queries to our
   //   replicas, for when we only need reads and we're ok w/ eventual consistency.
-  //
-  // - 'Sequelize' + the sequelize models are used to query pg through sequelize.
+  bottle.factory('KyselyPgPool', () =>
+    createPgPool(getPgMasterConnectionInfo()),
+  );
+
   bottle.factory(
     'KyselyPg',
-    () =>
+    (container) =>
       new Kysely<CombinedPg>({
         dialect: new PostgresDialect({
-          pool: new pg.Pool(getPgMasterConnectionInfo()),
-          cursor: Cursor as unknown as PostgresCursorConstructor,
+          pool: container.KyselyPgPool,
+          cursor: Cursor,
         }),
+        log: kyselyLogLevels,
       }),
   );
 
@@ -490,17 +575,36 @@ export default async function getBottle() {
     () =>
       new Kysely<CombinedPg>({
         dialect: new PostgresDialect({
-          pool: new pg.Pool({
+          pool: createPgPool({
             ...getPgMasterConnectionInfo(),
-            max: 150,
+            max: parseInt(process.env.DATABASE_READ_POOL_MAX ?? '150'),
             host: safeGetEnvVar('DATABASE_READ_ONLY_HOST'),
           }),
-          cursor: Cursor as unknown as PostgresCursorConstructor,
+          cursor: Cursor,
         }),
+        log: kyselyLogLevels,
       }),
   );
 
-  bottle.factory('IORedis', () =>
+  // AUTH-enabled Redis (e.g. ElastiCache with an auth token) rejects every
+  // command with NOAUTH unless credentials are sent, which leaves ioredis stuck
+  // before "ready" and parks commands in the offline queue forever. Local dev
+  // Redis has no password, so only pass credentials when REDIS_PASSWORD is set;
+  // REDIS_USER may be set-but-empty, which means the default user. Shared by the
+  // cluster and single-node paths so both authenticate identically.
+  const redisAuthOptions = (): { username?: string; password?: string } =>
+    process.env.REDIS_PASSWORD
+      ? {
+          ...(process.env.REDIS_USER
+            ? { username: process.env.REDIS_USER }
+            : {}),
+          password: process.env.REDIS_PASSWORD,
+        }
+      : {};
+
+  const makeRedis = (
+    extraOptions: { enableOfflineQueue?: boolean } = {},
+  ): IORedis.Redis | Cluster =>
     safeGetEnvVar('REDIS_USE_CLUSTER') === 'true'
       ? new IORedis.Cluster(
           [
@@ -518,8 +622,8 @@ export default async function getBottle() {
               // Required by BullMQ: its workers use blocking Redis commands
               // that would otherwise be misinterpreted as timed-out requests.
               maxRetriesPerRequest: null,
-              username: safeGetEnvVar('REDIS_USER'),
-              password: safeGetEnvVar('REDIS_PASSWORD'),
+              ...redisAuthOptions(),
+              ...extraOptions,
             },
           },
         )
@@ -529,23 +633,19 @@ export default async function getBottle() {
           maxRetriesPerRequest: null,
           port: parseInt(process.env.REDIS_PORT ?? '6379'),
           host: safeGetEnvVar('REDIS_HOST'),
-        }),
-  );
+          ...redisAuthOptions(),
+          ...(isEnvTrue('REDIS_TLS')
+            ? { tls: { servername: safeGetEnvVar('REDIS_HOST') } }
+            : {}),
+          ...extraOptions,
+        });
 
-
-  bottle.factory('Sequelize', () => makeDb());
-  bottle.factory('OrgModel', ({ Sequelize }) => Sequelize.Org);
-  bottle.factory('RuleModel', ({ Sequelize }) => Sequelize.Rule);
-  bottle.factory('ActionModel', ({ Sequelize }) => Sequelize.Action);
-  bottle.factory('PolicyModel', ({ Sequelize }) => Sequelize.Policy);
-  bottle.factory('ItemTypeModel', ({ Sequelize }) => Sequelize.ItemType);
-  bottle.factory(
-    'LocationBankModel',
-    ({ Sequelize }) => Sequelize.LocationBank,
-  );
-  bottle.factory(
-    'LocationBankLocationModel',
-    ({ Sequelize }) => Sequelize.LocationBankLocation,
+  bottle.factory('IORedis', () => makeRedis());
+  // With `enableOfflineQueue: false`, a `queue.addBulk` while Redis is
+  // unreachable rejects immediately instead of resolving against the
+  // in-process buffer. fails enqueue early with "couldn't enqueue".
+  bottle.factory('IORedisEnqueueNoBuffer', () =>
+    makeRedis({ enableOfflineQueue: false }),
   );
 
   // Data Warehouse abstraction layer
@@ -554,7 +654,7 @@ export default async function getBottle() {
   // Switch warehouse providers via WAREHOUSE_ADAPTER.
   //
   // - 'DataWarehouse' - Core queries and transactions
-  // - 'DataWarehouseDialect' - Type-safe Kysely queries  
+  // - 'DataWarehouseDialect' - Type-safe Kysely queries
   // - 'DataWarehouseAnalytics' - Bulk writes, CDC, logging
   bottle.factory('DataWarehouse', () => {
     const config = DataWarehouseFactory.createConfigFromEnv();
@@ -612,19 +712,13 @@ export default async function getBottle() {
   });
 
   bottle.factory('itemSubmissionQueueBulkWrite', (container) =>
-    makeItemSubmissionBulkWrite(container.IORedis, ITEM_SUBMISSION_QUEUE_NAME),
+    makeItemSubmissionBulkWrite(
+      container.IORedisEnqueueNoBuffer,
+      ITEM_SUBMISSION_QUEUE_NAME,
+    ),
   );
   bottle.factory('itemSubmissionRetryQueueBulkWrite', (container) =>
     makeItemSubmissionBulkWrite(container.IORedis, ITEM_SUBMISSION_DLQ_NAME),
-  );
-
-  // Legacy service deprecated in favor of kysely.
-  bottle.value(
-    'Knex',
-    knexPkg.default.knex({
-      client: 'pg',
-      connection: getPgMasterConnectionInfo,
-    }),
   );
 
   // Loggers
@@ -689,16 +783,32 @@ export default async function getBottle() {
   // keyspace aware and it's very annoying and likely error prone to be
   // switching keyspaces with `USE KEYSPACE` all the time.
   bottle.factory('Scylla', () => {
+    const contactPoints = safeGetEnvVar('SCYLLA_HOSTS')
+      .split(',')
+      .map((it) => it.trim())
+      .filter((it) => it.length > 0);
+    // For TLS hostname verification we need an SNI value that matches the
+    // server cert. Prefer an explicit `SCYLLA_SSL_SERVERNAME` (e.g., the
+    // Keyspaces regional endpoint) over inferring one from `SCYLLA_HOSTS`,
+    // which may contain multiple contact points with different cert names.
+    const sslServerName = process.env.SCYLLA_SSL_SERVERNAME ?? contactPoints[0];
     const scyllaDriver = new ScyllaClient({
-      contactPoints: safeGetEnvVar('SCYLLA_HOSTS')
-        .split(',')
-        .map((it) => it.trim()),
+      contactPoints,
       credentials: {
         username: safeGetEnvVar('SCYLLA_USERNAME'),
         password: safeGetEnvVar('SCYLLA_PASSWORD'),
       },
       localDataCenter: safeGetEnvVar('SCYLLA_LOCAL_DATACENTER'),
       keyspace: 'item_investigation_service',
+      protocolOptions: {
+        port: parseInt(process.env.SCYLLA_PORT ?? '9042'),
+      },
+      sslOptions: isEnvTrue('SCYLLA_SSL')
+        ? {
+            host: sslServerName,
+            rejectUnauthorized: true,
+          }
+        : undefined,
       pooling: {
         coreConnectionsPerHost: {
           [scyllaTypes.distance.local]: 3,
@@ -716,9 +826,61 @@ export default async function getBottle() {
         consistency: scyllaTypes.consistencies.localQuorum,
       },
     });
+
+    // Surface cluster state changes so reconnect storms are visible in logs.
+    scyllaDriver.on('hostUp', (host: ScyllaHost) => {
+      // eslint-disable-next-line no-restricted-syntax
+      logJson(`scylla.hostUp address=${host.address}`);
+    });
+    scyllaDriver.on('hostDown', (host: ScyllaHost) => {
+      // eslint-disable-next-line no-restricted-syntax
+      logJson(`scylla.hostDown address=${host.address}`);
+    });
+    // Forward driver-internal warnings/errors (auth, TLS, connection drops,
+    // etc.); skip the very chatty `info`/`verbose` levels.
+    scyllaDriver.on(
+      'log',
+      (
+        level: 'verbose' | 'info' | 'warning' | 'error',
+        source: string,
+        message: string,
+        furtherInfo?: unknown,
+      ) => {
+        if (level !== 'warning' && level !== 'error') {
+          return;
+        }
+        const wrapped = new Error(`scylla.${level}: [${source}] ${message}`);
+        if (furtherInfo instanceof Error) {
+          wrapped.stack = furtherInfo.stack ?? wrapped.stack;
+        }
+        // eslint-disable-next-line no-restricted-syntax
+        logErrorJson({
+          message: `scylla.driver.${level}`,
+          error: wrapped,
+        });
+      },
+    );
+
+    // cassandra-driver leaks ~4 HostMap listeners per failed `Client._connect()`
+    // retry and never recreates the HostMap, so the default cap of 10 trips
+    // after ~3 failures. Raise it so transient blips don't spam the warning,
+    // but keep it bounded so a true runaway is still noticeable.
+    const controlConnection = (
+      scyllaDriver as unknown as {
+        controlConnection?: {
+          hosts?: { setMaxListeners?: (n: number) => void };
+        };
+      }
+    ).controlConnection;
+    controlConnection?.hosts?.setMaxListeners?.(15);
+
     class ClosableScylla<
       DB extends Record<string, Record<string, unknown>>,
     > extends Scylla<DB> {
+      /** Eagerly connect; idempotent once `connected` is true. */
+      async connect() {
+        return scyllaDriver.connect();
+      }
       async close() {
         return scyllaDriver.shutdown();
       }
@@ -773,6 +935,7 @@ export default async function getBottle() {
         reviewerId,
         reviewerEmail,
         decisionReason,
+        suppressUserReportSweep,
       }) {
         const { orgId } = job;
         const { itemId, itemTypeIdentifier, data } = job.payload.item;
@@ -802,6 +965,7 @@ export default async function getBottle() {
             item,
             actorId,
             actorEmail,
+            decisionReason,
           } = params;
           const actionIds = decisionActions.map((action) => action.actionId);
           const [actions, policies] = await Promise.all([
@@ -867,6 +1031,7 @@ export default async function getBottle() {
                 targetItem: itemSubmission,
                 actorId,
                 actorEmail,
+                decisionReason,
               },
             )
             .catch((error) => {
@@ -887,419 +1052,411 @@ export default async function getBottle() {
           id: uuidv1(),
         });
 
-        await Promise.all(
-          // eslint-disable-next-line complexity
-          decisionComponents.map(async (decision) => {
-            switch (decision.type) {
-              // Don't need to do anything if the job is automatically closed
-              case 'AUTOMATIC_CLOSE':
-                break;
-              case 'IGNORE':
-                const ignoreCallback =
-                  await container.getIgnoreCallbackEventuallyConsistent(orgId);
-                if (ignoreCallback === undefined) {
+        try {
+          await Promise.all(
+            // eslint-disable-next-line complexity
+            decisionComponents.map(async (decision) => {
+              switch (decision.type) {
+                // Don't need to do anything if the job is automatically closed
+                case 'AUTOMATIC_CLOSE':
                   break;
-                }
-                const ignoreCallbackBody = {
-                  id: job.payload.item.itemId,
-                  typeId: job.payload.item.itemTypeIdentifier.id,
-                  data: job.payload.item.data,
-                  ...(job.payload.kind === 'NCMEC'
-                    ? {
-                        ncmecMedia: job.payload.allMediaItems.map((it) => ({
-                          id: it.contentItem.itemId,
-                          typeId: it.contentItem.itemTypeIdentifier,
-                        })),
-                      }
-                    : {}),
-                };
-
-                await container.fetchHTTP({
-                  url: ignoreCallback,
-                  method: 'post',
-                  body: jsonStringify(ignoreCallbackBody),
-                  logRequestAndResponseBody: 'ON_FAILURE',
-                  headers: {
-                    'Content-Type': 'application/json',
-                  },
-                  handleResponseBody: 'discard',
-                  signWith: container.SigningKeyPairService.sign.bind(
-                    container.SigningKeyPairService,
-                    orgId,
-                  ),
-                });
-                break;
-              // The difference in payload between reject/accept appeal
-              // is handled in the action publisher, so these cases have
-              // the same logic
-              case 'REJECT_APPEAL':
-              case 'ACCEPT_APPEAL':
-                const appealedItemType =
-                  await container.getItemTypeEventuallyConsistent({
-                    orgId,
-                    typeSelector: job.payload.item.itemTypeIdentifier,
-                  });
-                if (!appealedItemType) {
-                  throw new Error('Item Type does not exist');
-                }
-
-                const orgAppealSettings =
-                  await container.OrgSettingsService.getAppealSettings(orgId);
-
-                if (!orgAppealSettings.appealCallbackUrl) {
-                  throw Error(`No Appeal Callback URL set for org ${orgId}`);
-                }
-                const appealCustomBodyParams =
-                  orgAppealSettings.appealCallbackBody;
-                const appealHeaders = orgAppealSettings.appealCallbackHeaders;
-
-                const appealCallbackBody = {
-                  appealId: decision.appealId,
-                  appealedBy: {
-                    id:
-                      'appealerIdentifier' in job.payload
-                        ? job.payload.appealerIdentifier?.id
-                        : undefined,
-
-                    typeId:
-                      'appealerIdentifier' in job.payload
-                        ? job.payload.appealerIdentifier?.typeId
-                        : undefined,
-                  },
-                  appealDecision:
-                    decision.type === 'ACCEPT_APPEAL' ? 'ACCEPT' : 'REJECT',
-                  item: {
+                case 'IGNORE':
+                  const ignoreCallback =
+                    await container.getIgnoreCallbackEventuallyConsistent(
+                      orgId,
+                    );
+                  if (ignoreCallback === undefined) {
+                    break;
+                  }
+                  const ignoreCallbackBody = {
                     id: job.payload.item.itemId,
                     typeId: job.payload.item.itemTypeIdentifier.id,
-                  },
-                  ...(appealCustomBodyParams
-                    ? { custom: appealCustomBodyParams }
-                    : {}),
-                };
-
-                const appealResponse = await container.fetchHTTP({
-                  url: orgAppealSettings.appealCallbackUrl,
-                  method: 'post',
-                  body: jsonStringify(appealCallbackBody),
-                  logRequestAndResponseBody: 'ON_FAILURE',
-                  headers: {
-                    // TODO: We should make sure that there's no value a user
-                    // could provide that would have security implications when blindly fed
-                    // in here -- like something that would somehow lead fetch to do something
-                    // unexpected.
-                    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
-                    ...((appealHeaders as JsonObject | undefined) ?? undefined),
-                    // Put this header last so customHeaders can't override it, which I
-                    // think makes sense, since there's no way for users to effect the
-                    // body in a way that would change the content type.
-                    'Content-Type': 'application/json',
-                  },
-                  handleResponseBody: 'discard',
-                  signWith: container.SigningKeyPairService.sign.bind(
-                    container.SigningKeyPairService,
-                    orgId,
-                  ),
-                });
-
-                if (!appealResponse.ok) {
-                  throw Error(`User's server returned non-success status`);
-                }
-                break;
-
-              case 'CUSTOM_ACTION':
-                const actions = decision.actions.map((action) => {
-                  const actionPayload = {
-                    actionId: action.id,
-                    ...(decision.actionIdsToMrtApiParamDecisionPayload !==
-                    undefined
+                    data: job.payload.item.data,
+                    ...(job.payload.kind === 'NCMEC'
                       ? {
-                          customMrtApiParamDecisionPayload: decision
-                            .actionIdsToMrtApiParamDecisionPayload[
-                            action.id
-                          ] as Record<string, string | boolean | unknown>,
+                          ncmecMedia: job.payload.allMediaItems.map((it) => ({
+                            id: it.contentItem.itemId,
+                            typeId: it.contentItem.itemTypeIdentifier,
+                          })),
                         }
                       : {}),
                   };
-                  // By default reportedForReasons as well as decision reason to the
-                  // custom action callback payload whether or not there is an
-                  // existing custom payload
-                  if (job.payload.kind === 'DEFAULT') {
-                    // TODO: this is unholy we have got to remove this as soon
-                    // as possible, specifically when the new report decision
-                    // API is in place
-                    const additionalPayload = job.payload.reportedForReasons
-                      ? {
-                          // eslint-disable-next-line no-restricted-syntax
-                          reportHistory: job.payload.reportedForReasons.map(
-                            (it) => ({
-                              reason: it.reason,
-                              reporter: it.reporterId,
-                            }),
-                          ),
-                          reason: decisionReason,
-                        }
-                      : { reason: decisionReason };
-                    actionPayload.customMrtApiParamDecisionPayload = {
-                      ...actionPayload.customMrtApiParamDecisionPayload,
-                      ...(additionalPayload.reportHistory
-                        ? additionalPayload
-                        : {}),
-                    };
-                  }
-                  return actionPayload;
-                });
-                // TODO: make this illegal at the time the decision is submitted.
-                if (!isNonEmptyArray(actions)) {
-                  throw new Error(
-                    'Attempting to take a user action without any actions',
-                  );
-                }
-                await publishActions({
-                  decisionActions: actions,
-                  policyIds: decision.policies.map((policy) => policy.id),
-                  orgId,
-                  item: job.payload.item,
-                  actorId: reviewerId,
-                  actorEmail: reviewerEmail,
-                });
-                break;
-              case 'SUBMIT_NCMEC_REPORT':
-                if (job.payload.kind !== 'NCMEC') {
-                  throw new Error(
-                    'Attempting to submit a NCMEC report for a non-NCMEC job',
-                  );
-                }
-                const itemType =
-                  await container.getItemTypeEventuallyConsistent({
-                    orgId,
-                    typeSelector: itemTypeIdentifier,
-                  });
-                if (itemType === undefined || itemType.kind !== 'USER') {
-                  throw new Error('Item Type for User does not exist');
-                }
-                const displayName = getFieldValueForRole(
-                  itemType.schema,
-                  itemType.schemaFieldRoles,
-                  'displayName',
-                  data,
-                );
-                const profilePicUrl = getFieldValueForRole(
-                  itemType.schema,
-                  itemType.schemaFieldRoles,
-                  'profileIcon',
-                  data,
-                );
 
-                const allMedia = job.payload.allMediaItems;
-                const media = await Promise.all(
-                  decision.reportedMedia.map(async (it) => {
-                    const reportedItem = allMedia.find(
-                      (payloadMedia) =>
-                        payloadMedia.contentItem.itemId === it.id,
-                    );
-                    if (reportedItem === undefined) {
-                      throw new Error(
-                        'Unable to find reported media in job payload',
-                      );
-                    }
-                    const itemType =
-                      await container.getItemTypeEventuallyConsistent({
-                        orgId,
-                        typeSelector:
-                          reportedItem.contentItem.itemTypeIdentifier,
-                      });
-                    if (itemType === undefined) {
-                      throw new Error(
-                        'Unable to find item type for reported media',
-                      );
-                    }
-
-                    const createdAt =
-                      getFieldValueForRole(
-                        itemType.schema,
-                        itemType.schemaFieldRoles,
-                        'createdAt',
-                        reportedItem.contentItem.data,
-                      ) ?? makeDateString(new Date().toISOString());
-                    if (createdAt === undefined) {
-                      throw new Error('No created at for reported media');
-                    }
-
-                    return {
-                      id: it.id,
-                      typeId: it.typeId,
-                      url: it.url,
-                      createdAt,
-                      industryClassification: it.industryClassification,
-                      fileAnnotations: it.fileAnnotations,
-                    };
-                  }),
-                );
-                const isTest = !ncmecProdQueues.includes(queueId);
-                await container.NcmecService.submitReport(
-                  {
-                    reportedUser: {
-                      id: itemId,
-                      typeId: itemTypeIdentifier.id,
-                      ...(displayName ? { displayName } : {}),
-                      ...(profilePicUrl
-                        ? { profilePicture: profilePicUrl.url }
-                        : {}),
+                  await container.fetchHTTP({
+                    url: ignoreCallback,
+                    method: 'post',
+                    body: jsonStringify(ignoreCallbackBody),
+                    logRequestAndResponseBody: 'ON_FAILURE',
+                    headers: {
+                      'Content-Type': 'application/json',
                     },
-                    threads: decision.reportedMessages,
-                    orgId,
-                    media,
-                    reviewerId,
-                    incidentType: decision.incidentType,
-                    ...(decision.escalateToHighPriority != null &&
-                    decision.escalateToHighPriority.trim() !== ''
-                      ? { escalateToHighPriority: decision.escalateToHighPriority.trim() }
+                    handleResponseBody: 'discard',
+                    signWith: container.SigningKeyPairService.sign.bind(
+                      container.SigningKeyPairService,
+                      orgId,
+                    ),
+                  });
+                  break;
+                // The difference in payload between reject/accept appeal
+                // is handled in the action publisher, so these cases have
+                // the same logic
+                case 'REJECT_APPEAL':
+                case 'ACCEPT_APPEAL':
+                  const appealedItemType =
+                    await container.getItemTypeEventuallyConsistent({
+                      orgId,
+                      typeSelector: job.payload.item.itemTypeIdentifier,
+                    });
+                  if (!appealedItemType) {
+                    throw new Error('Item Type does not exist');
+                  }
+
+                  const orgAppealSettings =
+                    await container.OrgSettingsService.getAppealSettings(orgId);
+
+                  if (!orgAppealSettings.appealCallbackUrl) {
+                    throw Error(`No Appeal Callback URL set for org ${orgId}`);
+                  }
+                  const appealCustomBodyParams =
+                    orgAppealSettings.appealCallbackBody;
+                  const appealHeaders = orgAppealSettings.appealCallbackHeaders;
+
+                  const appealCallbackBody = {
+                    appealId: decision.appealId,
+                    appealedBy: {
+                      id:
+                        'appealerIdentifier' in job.payload
+                          ? job.payload.appealerIdentifier?.id
+                          : undefined,
+
+                      typeId:
+                        'appealerIdentifier' in job.payload
+                          ? job.payload.appealerIdentifier?.typeId
+                          : undefined,
+                    },
+                    appealDecision:
+                      decision.type === 'ACCEPT_APPEAL' ? 'ACCEPT' : 'REJECT',
+                    item: {
+                      id: job.payload.item.itemId,
+                      typeId: job.payload.item.itemTypeIdentifier.id,
+                    },
+                    ...(appealCustomBodyParams
+                      ? { custom: appealCustomBodyParams }
                       : {}),
-                  },
-                  isTest,
-                );
-                const actionAndPolicy =
-                  await container.NcmecService.getNCMECActionsToRunAndPolicies(
-                    orgId,
-                  );
-                const decisionActions = actionAndPolicy?.actionsToRunIds
-                  ? actionAndPolicy.actionsToRunIds.map((a) => ({
-                      actionId: a,
-                    }))
-                  : [];
-                if (
-                  actionAndPolicy != null &&
-                  actionAndPolicy.actionsToRunIds != null &&
-                  isNonEmptyArray(decisionActions) &&
-                  !isTest
-                ) {
+                  };
+
+                  const appealResponse = await container.fetchHTTP({
+                    url: orgAppealSettings.appealCallbackUrl,
+                    method: 'post',
+                    body: jsonStringify(appealCallbackBody),
+                    logRequestAndResponseBody: 'ON_FAILURE',
+                    headers: {
+                      // TODO: We should make sure that there's no value a user
+                      // could provide that would have security implications when blindly fed
+                      // in here -- like something that would somehow lead fetch to do something
+                      // unexpected.
+
+                      ...((appealHeaders as JsonObject | undefined) ??
+                        undefined),
+                      // Put this header last so customHeaders can't override it, which I
+                      // think makes sense, since there's no way for users to effect the
+                      // body in a way that would change the content type.
+                      'Content-Type': 'application/json',
+                    },
+                    handleResponseBody: 'discard',
+                    signWith: container.SigningKeyPairService.sign.bind(
+                      container.SigningKeyPairService,
+                      orgId,
+                    ),
+                  });
+
+                  if (!appealResponse.ok) {
+                    throw Error(`User's server returned non-success status`);
+                  }
+                  break;
+
+                case 'CUSTOM_ACTION':
+                  const actions = decision.actions.map((action) => {
+                    const actionPayload = {
+                      actionId: action.id,
+                      ...(decision.actionIdsToMrtApiParamDecisionPayload !==
+                      undefined
+                        ? {
+                            customMrtApiParamDecisionPayload: decision
+                              .actionIdsToMrtApiParamDecisionPayload[
+                              action.id
+                            ] as Record<string, string | boolean | unknown>,
+                          }
+                        : {}),
+                    };
+                    // By default reportedForReasons as well as decision reason to the
+                    // custom action callback payload whether or not there is an
+                    // existing custom payload
+                    if (job.payload.kind === 'DEFAULT') {
+                      // TODO: this is unholy we have got to remove this as soon
+                      // as possible, specifically when the new report decision
+                      // API is in place
+                      const additionalPayload = job.payload.reportedForReasons
+                        ? {
+                            reportHistory: job.payload.reportedForReasons.map(
+                              (it) => ({
+                                reason: it.reason,
+                                reporter: it.reporterId,
+                              }),
+                            ),
+                            reason: decisionReason,
+                          }
+                        : { reason: decisionReason };
+                      actionPayload.customMrtApiParamDecisionPayload = {
+                        ...actionPayload.customMrtApiParamDecisionPayload,
+                        ...(additionalPayload.reportHistory
+                          ? additionalPayload
+                          : {}),
+                      };
+                    }
+                    return actionPayload;
+                  });
+                  // TODO: make this illegal at the time the decision is submitted.
+                  if (!isNonEmptyArray(actions)) {
+                    throw new Error(
+                      'Attempting to take a user action without any actions',
+                    );
+                  }
                   await publishActions({
-                    decisionActions,
-                    policyIds: actionAndPolicy.policyIds,
+                    decisionActions: actions,
+                    policyIds: decision.policies.map((policy) => policy.id),
                     orgId,
                     item: job.payload.item,
                     actorId: reviewerId,
                     actorEmail: reviewerEmail,
+                    decisionReason,
                   });
-                }
-                break;
-              case 'TRANSFORM_JOB_AND_RECREATE_IN_QUEUE': {
-                const reportHistory =
-                  'reportHistory' in job.payload
-                    ? job.payload.reportHistory
+                  break;
+                case 'SUBMIT_NCMEC_REPORT': {
+                  if (job.payload.kind !== 'NCMEC') {
+                    throw new Error(
+                      'Attempting to submit a NCMEC report for a non-NCMEC job',
+                    );
+                  }
+                  const itemType =
+                    await container.getItemTypeEventuallyConsistent({
+                      orgId,
+                      typeSelector: itemTypeIdentifier,
+                    });
+                  if (itemType === undefined || itemType.kind !== 'USER') {
+                    throw new Error('Item Type for User does not exist');
+                  }
+                  const reportParams =
+                    await buildSubmitReportParamsFromDecision({
+                      orgId,
+                      reviewerId,
+                      reportedItemId: itemId,
+                      reportedItemTypeId: itemTypeIdentifier.id,
+                      reportedUserItemType: itemType,
+                      reportedUserData: data,
+                      allMediaItems: job.payload.allMediaItems,
+                      decisionComponent: decision,
+                      jobId: job.id,
+                      getItemTypeEventuallyConsistent:
+                        container.getItemTypeEventuallyConsistent,
+                    });
+                  // Submissions go to the NCMEC test endpoint
+                  // (exttest.cybertip.org) unless the deployment is explicitly
+                  // configured for production via NCMEC_ENV=production. Operators
+                  // are responsible for matching this to whether the credentials
+                  // configured in Settings → NCMEC are production or test
+                  // credentials issued by NCMEC.
+                  const isTest = process.env.NCMEC_ENV !== 'production';
+                  await container.NcmecService.submitReport(
+                    reportParams,
+                    isTest,
+                  );
+                  const actionAndPolicy =
+                    await container.NcmecService.getNCMECActionsToRunAndPolicies(
+                      orgId,
+                    );
+                  const decisionActions = actionAndPolicy?.actionsToRunIds
+                    ? actionAndPolicy.actionsToRunIds.map((a) => ({
+                        actionId: a,
+                      }))
                     : [];
-                const reportedForReasons =
-                  'reportedForReasons' in job.payload &&
-                  job.payload.reportedForReasons != null &&
-                  job.payload.reportedForReasons.length > 0
-                    ? job.payload.reportedForReasons
-                    : reportHistory.map((entry) => ({
-                        reporterId: entry.reporterId,
-                        reason: entry.reason,
-                      }));
-                const defaultJobInput = {
-                  enqueueSource: 'MRT_JOB',
-                  enqueueSourceInfo: { kind: 'MRT_JOB' },
-                  reenqueuedFrom: { jobId: job.id },
-                  payload: {
-                    kind: 'DEFAULT' as const,
-                    item: job.payload.item,
-                    ...{
-                      reportIds:
-                        'reportIds' in job.payload
-                          ? job.payload.reportIds ?? []
-                          : [],
-                    },
-                    ...('reportedForReason' in job.payload
-                      ? { reportedForReason: job.payload.reportedForReason }
-                      : {}),
-                    ...('reporterIdentifier' in job.payload
-                      ? {
-                          reporterIdentifier: job.payload.reporterIdentifier,
-                        }
-                      : {}),
-                    reportedForReasons,
-                    reportHistory,
-                  },
-                  createdAt: new Date(),
-                  orgId,
-                  correlationId,
-                  policyIds: job.policyIds,
-                } as const;
-                switch (decision.newJobKind) {
-                  case 'DEFAULT':
-                    await container.ManualReviewToolService.enqueue(
-                      defaultJobInput,
-
-                      decision.newQueueId ?? undefined,
-                    );
-                    break;
-                  case 'NCMEC':
-                    // TODO: the NCMEC service is currently in charge of NCMEC job
-                    // enrichment, but once we replace the NCMEC warehouse job with
-                    // Scylla we should move it back into the MRT service
-                    await container.NcmecService.enqueueForHumanReviewIfApplicable(
-                      {
-                        orgId,
-                        createdAt: new Date(),
-                        enqueueSource: 'MRT_JOB',
-                        enqueueSourceInfo: { kind: 'MRT_JOB' },
-                        correlationId,
-                        item: job.payload.item,
-                        reenqueuedFrom: { jobId: job.id },
-                      },
-                    );
-                    break;
-                  default:
-                    assertUnreachable(decision.newJobKind);
+                  if (
+                    actionAndPolicy != null &&
+                    actionAndPolicy.actionsToRunIds != null &&
+                    isNonEmptyArray(decisionActions) &&
+                    !isTest
+                  ) {
+                    await publishActions({
+                      decisionActions,
+                      policyIds: actionAndPolicy.policyIds,
+                      orgId,
+                      item: job.payload.item,
+                      actorId: reviewerId,
+                      actorEmail: reviewerEmail,
+                    });
+                  }
+                  break;
                 }
-                break;
+                case 'TRANSFORM_JOB_AND_RECREATE_IN_QUEUE': {
+                  const reportHistory =
+                    'reportHistory' in job.payload
+                      ? job.payload.reportHistory
+                      : [];
+                  const reportedForReasons =
+                    'reportedForReasons' in job.payload &&
+                    job.payload.reportedForReasons != null &&
+                    job.payload.reportedForReasons.length > 0
+                      ? job.payload.reportedForReasons
+                      : reportHistory.map((entry) => ({
+                          reporterId: entry.reporterId,
+                          reason: entry.reason,
+                        }));
+                  const defaultJobInput = {
+                    enqueueSource: 'MRT_JOB',
+                    enqueueSourceInfo: { kind: 'MRT_JOB' },
+                    reenqueuedFrom: { jobId: job.id },
+                    payload: {
+                      kind: 'DEFAULT' as const,
+                      item: job.payload.item,
+                      ...{
+                        reportIds:
+                          'reportIds' in job.payload
+                            ? (job.payload.reportIds ?? [])
+                            : [],
+                      },
+                      ...('reportedForReason' in job.payload
+                        ? { reportedForReason: job.payload.reportedForReason }
+                        : {}),
+                      ...('reporterIdentifier' in job.payload
+                        ? {
+                            reporterIdentifier: job.payload.reporterIdentifier,
+                          }
+                        : {}),
+                      reportedForReasons,
+                      reportHistory,
+                    },
+                    createdAt: new Date(),
+                    orgId,
+                    correlationId,
+                    policyIds: job.policyIds,
+                  } as const;
+                  switch (decision.newJobKind) {
+                    case 'DEFAULT':
+                      await container.ManualReviewToolService.enqueue(
+                        defaultJobInput,
+
+                        decision.newQueueId ?? undefined,
+                      );
+                      break;
+                    case 'NCMEC':
+                      // TODO: the NCMEC service is currently in charge of NCMEC job
+                      // enrichment, but once we replace the NCMEC warehouse job with
+                      // Scylla we should move it back into the MRT service
+                      await container.NcmecService.enqueueForHumanReviewIfApplicable(
+                        {
+                          orgId,
+                          createdAt: new Date(),
+                          enqueueSource: 'MRT_JOB',
+                          enqueueSourceInfo: { kind: 'MRT_JOB' },
+                          correlationId,
+                          item: job.payload.item,
+                          reenqueuedFrom: { jobId: job.id },
+                        },
+                      );
+                      break;
+                    default:
+                      assertUnreachable(decision.newJobKind);
+                  }
+                  break;
+                }
+
+                default:
+                  assertUnreachable(decision);
+              }
+            }),
+          );
+
+          // Publish any related actions
+          const flattenedRelatedActions = relatedActions.flatMap((it) => {
+            return it.itemIds.map((itemId) => ({
+              ..._.omit(it, 'itemIds'),
+              itemId,
+            }));
+          });
+          await Promise.all(
+            flattenedRelatedActions.map(async (it) => {
+              const { actionIds, policyIds, itemId, itemTypeId } = it;
+              if (!isNonEmptyArray(actionIds)) {
+                return;
               }
 
-              default:
-                assertUnreachable(decision);
-            }
-          }),
-        );
-
-        // Publish any related actions
-        const flattenedRelatedActions = relatedActions.flatMap((it) => {
-          return it.itemIds.map((itemId) => ({
-            ..._.omit(it, 'itemIds'),
-            itemId,
-          }));
-        });
-        await Promise.all(
-          flattenedRelatedActions.map(async (it) => {
-            const { actionIds, policyIds, itemId, itemTypeId } = it;
-            if (!isNonEmptyArray(actionIds)) {
-              return;
-            }
-
-            const itemType = await container.getItemTypeEventuallyConsistent({
-              orgId,
-              typeSelector: { id: itemTypeId },
-            });
-
-            if (!itemType) {
-              return;
-            }
-            const decisionActions = actionIds.map((actionId) => ({
-              actionId,
-            }));
-
-            if (isNonEmptyArray(decisionActions)) {
-              await publishActions({
-                decisionActions,
-                policyIds,
+              const itemType = await container.getItemTypeEventuallyConsistent({
                 orgId,
-                item: { itemId, itemType },
-                actorId: reviewerId,
-                actorEmail: reviewerEmail,
+                typeSelector: { id: itemTypeId },
+              });
+
+              if (!itemType) {
+                return;
+              }
+              const decisionActions = actionIds.map((actionId) => ({
+                actionId,
+              }));
+
+              if (isNonEmptyArray(decisionActions)) {
+                await publishActions({
+                  decisionActions,
+                  policyIds,
+                  orgId,
+                  item: { itemId, itemType },
+                  actorId: reviewerId,
+                  actorEmail: reviewerEmail,
+                });
+              }
+            }),
+          );
+        } finally {
+          if (!suppressUserReportSweep && isReportJob(job)) {
+            const reportJob = job;
+            const customActions = [
+              ...decisionComponents.flatMap((decision) =>
+                decision.type === 'CUSTOM_ACTION' ? [decision] : [],
+              ),
+              ...relatedActions
+                .filter((ra) => ra.actionIds.length > 0)
+                .map((ra) => ({
+                  type: 'CUSTOM_ACTION' as const,
+                  actions: ra.actionIds.map((id) => ({ id })),
+                  policies: ra.policyIds.map((id) => ({ id })),
+                  itemIds: [...ra.itemIds],
+                  itemTypeId: ra.itemTypeId,
+                })),
+            ];
+            if (customActions.length > 0) {
+              container.ManualReviewToolService.maybeClearOtherReportsForUser({
+                orgId,
+                actionedJob: reportJob,
+                actionedQueueId: queueId,
+                customActions,
+                reviewerId,
+                reviewerEmail,
+                decisionReason,
+              }).catch((error) => {
+                container.Tracer.addSpan(
+                  {
+                    resource: 'mrtService',
+                    operation: 'clearOtherReportsForUser',
+                  },
+                  (span) => {
+                    span.setAttribute('job.id', reportJob.id);
+                    span.setAttribute('org.id', orgId);
+                    container.Tracer.logSpanFailed(span, error);
+                    return null;
+                  },
+                );
               });
             }
-          }),
-        );
+          }
+        }
       },
       async function onEnqueue(
         _input: ManualReviewJobInput | ManualReviewAppealJobInput,
@@ -1343,41 +1500,37 @@ export default async function getBottle() {
   bottle.factory(
     'getPolicyActionPenaltiesEventuallyConsistent',
     (container) => {
-      const Org = container.OrgModel;
+      const moderationConfigService = container.ModerationConfigService;
 
       return cached({
         async producer(orgId) {
-          return Org.getPolicyActionPenaltiesEventuallyConsistent(orgId);
+          return getPolicyActionPenaltiesForOrg(moderationConfigService, orgId);
         },
         directives: { freshUntilAge: 60 },
       });
     },
   );
 
-  bottle.factory(
-    'getImageBankEventuallyConsistent',
-    (container) => {
-      const kyselyPg = container.KyselyPg;
-      const hashBankService = new HashBankService(kyselyPg);
+  bottle.factory('getImageBankEventuallyConsistent', (container) => {
+    const kyselyPg = container.KyselyPg;
+    const hashBankService = new HashBankService(kyselyPg);
 
-      return cached({
-        async producer({ orgId, bankId }) {
-          // bankId could be either database ID or bank name
-          // Check if bankId is numeric (database ID)
-          const numericBankId = parseInt(bankId);
-          if (!isNaN(numericBankId)) {
-            // Get by database ID
-            return hashBankService.findById(numericBankId, orgId);
-          } else {
-            // Get by name
-            return hashBankService.findByName(bankId, orgId);
-          }
-        },
-        directives: { freshUntilAge: 300 }, // 5 minutes cache for image banks
-      });
-    },
-  );
-
+    return cached({
+      async producer({ orgId, bankId }) {
+        // bankId could be either database ID or bank name
+        // Check if bankId is numeric (database ID)
+        const numericBankId = parseInt(bankId);
+        if (!isNaN(numericBankId)) {
+          // Get by database ID
+          return hashBankService.findById(numericBankId, orgId);
+        } else {
+          // Get by name
+          return hashBankService.findByName(bankId, orgId);
+        }
+      },
+      directives: { freshUntilAge: 300 }, // 5 minutes cache for image banks
+    });
+  });
 
   bottle.factory('getUserStrikeTTLInDaysEventuallyConsistent', (container) => {
     return cached({
@@ -1394,12 +1547,6 @@ export default async function getBottle() {
       directives: { freshUntilAge: 600 },
     });
   });
-
-  register(
-    bottle,
-    'getSequelizeItemTypeEventuallyConsistent',
-    makeGetSequelizeItemTypeEventuallyConsistent,
-  );
 
   register(
     bottle,
@@ -1541,18 +1688,8 @@ export default async function getBottle() {
                 }[CloseMethodName];
               }[keyof Dependencies]
             >,
-            // Seqelize puts a close method on each model, but we only need to
-            // close the root sequelize instance.
-            | 'OrgModel'
-            | 'PolicyModel'
-            | 'RuleModel'
-            | 'ActionModel'
-            | 'ItemTypeModel'
-            | 'LocationBankModel'
-            | 'LocationBankLocationModel'
             // Services that don't need cleanup
-            | 'UserStatisticsService'
-            | 'HMAHashBankService'
+            'UserStatisticsService' | 'HMAHashBankService'
           >;
 
           // This will be a type error if we forgot to close something.
@@ -1568,9 +1705,8 @@ export default async function getBottle() {
             'Scylla',
             'itemSubmissionQueueBulkWrite',
             'itemSubmissionRetryQueueBulkWrite',
-            'Sequelize',
-            'Knex',
             'IORedis',
+            'IORedisEnqueueNoBuffer',
             // Storage abstractions
             'DataWarehouse',
             'DataWarehouseDialect',
@@ -1578,7 +1714,6 @@ export default async function getBottle() {
             'ReportingAnalyticsAdapter',
             'KyselyPg',
             'KyselyPgReadReplica',
-            'getSequelizeItemTypeEventuallyConsistent',
             'getEnabledRulesForItemTypeEventuallyConsistent',
             'getPoliciesForRulesEventuallyConsistent',
             'getActionsForRuleEventuallyConsistent',
@@ -1622,11 +1757,34 @@ export default async function getBottle() {
                 async () => {
                   if ('close' in it && typeof it.close === 'function') {
                     await it.close();
-                  } else if ('destroy' in it && typeof it.destroy === 'function') {
+                  } else if (
+                    'destroy' in it &&
+                    typeof it.destroy === 'function'
+                  ) {
                     await it.destroy();
                   } else if ('quit' in it && typeof it.quit === 'function') {
-                    await it.quit();
-                  } else if ('flushPendingWrites' in it && typeof it.flushPendingWrites === 'function') {
+                    // ioredis `quit()` writes a QUIT command to the wire. On
+                    // a client built with `enableOfflineQueue: false`, that
+                    // throws synchronously if the stream isn't writeable
+                    // (e.g. the connection never opened, as is common in
+                    // unit tests). Fall back to a hard disconnect in that
+                    // case so shutdown doesn't fail.
+                    try {
+                      await it.quit();
+                    } catch (err) {
+                      if (
+                        'disconnect' in it &&
+                        typeof it.disconnect === 'function'
+                      ) {
+                        it.disconnect();
+                      } else {
+                        throw err;
+                      }
+                    }
+                  } else if (
+                    'flushPendingWrites' in it &&
+                    typeof it.flushPendingWrites === 'function'
+                  ) {
                     await it.flushPendingWrites();
                   }
                 },

@@ -163,13 +163,13 @@ function _camelCaseObjectKeysToSnakeCaseDeepHelper<O>(
         _camelCaseObjectKeysToSnakeCaseDeepHelper(it),
       ) as SnakeCasedPropertiesDeepWithArrays<O>)
     : _.isPlainObject(o)
-    ? (Object.fromEntries(
-        Object.entries(o as { [k: string]: unknown }).map(([k, v]) => [
-          camelToSnakeCase(k),
-          _camelCaseObjectKeysToSnakeCaseDeepHelper(v),
-        ]),
-      ) as SnakeCasedPropertiesDeepWithArrays<O>)
-    : (o as SnakeCasedPropertiesDeepWithArrays<O>);
+      ? (Object.fromEntries(
+          Object.entries(o as { [k: string]: unknown }).map(([k, v]) => [
+            camelToSnakeCase(k),
+            _camelCaseObjectKeysToSnakeCaseDeepHelper(v),
+          ]),
+        ) as SnakeCasedPropertiesDeepWithArrays<O>)
+      : (o as SnakeCasedPropertiesDeepWithArrays<O>);
 }
 
 /**
@@ -202,7 +202,6 @@ export function patchInPlace<T extends object>(object: T, patch: Partial<T>) {
 }
 
 export function removeUndefinedKeys<T extends object>(object: T) {
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   return _.pickBy(object, (v) => v !== undefined);
 }
 

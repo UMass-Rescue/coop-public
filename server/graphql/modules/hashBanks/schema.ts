@@ -1,6 +1,4 @@
-import { gql } from 'apollo-server-express';
-
-export const typeDefs = gql`
+export const typeDefs = /* GraphQL */ `
   type ExchangeInfo {
     api: String!
     enabled: Boolean!
@@ -82,7 +80,7 @@ export const typeDefs = gql`
   }
 
   union MutateHashBankResponse =
-      MutateHashBankSuccessResponse
+    | MutateHashBankSuccessResponse
     | MatchingBankNameExistsError
 
   type Query {
@@ -97,6 +95,9 @@ export const typeDefs = gql`
     createHashBank(input: CreateHashBankInput!): MutateHashBankResponse!
     updateHashBank(input: UpdateHashBankInput!): MutateHashBankResponse!
     deleteHashBank(id: ID!): Boolean!
-    updateExchangeCredentials(apiName: String!, credentialsJson: String!): Boolean!
+    updateExchangeCredentials(
+      apiName: String!
+      credentialsJson: String!
+    ): Boolean!
   }
-`; 
+`;

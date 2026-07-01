@@ -1,10 +1,16 @@
 // This type is intentionally more limited than the corresponding model,
 // since this service should not have any dependencies on the model instances'
 
-import { makeEnumLike } from '@roostorg/types';
-import { type JsonObject, type ReadonlyDeep, type Simplify } from 'type-fest';
+import { makeEnumLike } from '@roostorg/coop-types';
+import {
+  type JsonObject,
+  type JsonValue,
+  type ReadonlyDeep,
+  type Simplify,
+} from 'type-fest';
 
 import { type TaggedUnionFromCases } from '../../../utils/typescript-types.js';
+import { type UserPenaltySeverity } from './shared.js';
 
 export const ActionType = makeEnumLike([
   'CUSTOM_ACTION',
@@ -27,7 +33,9 @@ type AnyAction = ReadonlyDeep<
       id: string;
       orgId: string;
       name: string;
+      description: string | null;
       applyUserStrikes: boolean;
+      penalty: UserPenaltySeverity;
     } & TaggedUnionFromCases<
       { actionType: ActionType },
       {
@@ -38,7 +46,7 @@ type AnyAction = ReadonlyDeep<
           callbackUrl: string;
           callbackUrlHeaders: JsonObject | null;
           callbackUrlBody: JsonObject | null;
-          customMrtApiParams: JsonObject | null;
+          customMrtApiParams: JsonValue | null;
         };
       }
     >

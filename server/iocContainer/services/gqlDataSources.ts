@@ -1,5 +1,4 @@
 import type Bottle from '@ethanresnick/bottlejs';
-import { DataSource } from 'apollo-datasource';
 
 import makeActionAPI, {
   type ActionAPI,
@@ -14,15 +13,19 @@ import makeLocationBankAPI, {
   type LocationBankAPI,
 } from '../../graphql/datasources/LocationBankApi.js';
 import makeOrgAPI, { type OrgAPI } from '../../graphql/datasources/OrgApi.js';
+import makeRoleAPI, {
+  type RoleAPI,
+} from '../../graphql/datasources/RoleApi.js';
 import makeRuleAPI, {
   type RuleAPI,
 } from '../../graphql/datasources/RuleApi.js';
-import { type HmaService } from '../../services/hmaService/index.js';
 import makeUserAPI, {
   type UserAPI,
 } from '../../graphql/datasources/UserApi.js';
+import { type HmaService } from '../../services/hmaService/index.js';
 import { type Dependencies } from '../index.js';
 import { register } from '../utils.js';
+
 // HMA service will be registered in main IoC container to avoid circular dependencies
 
 declare module '../index.js' {
@@ -33,6 +36,7 @@ declare module '../index.js' {
     InvestigationAPIDataSource: InvestigationAPI;
     LocationBankAPIDataSource: LocationBankAPI;
     OrgAPIDataSource: OrgAPI;
+    RoleAPIDataSource: RoleAPI;
     RuleAPIDataSource: RuleAPI;
     UserAPIDataSource: UserAPI;
     DataSources: DataSources;
@@ -49,6 +53,7 @@ export function registerGqlDataSources(bottle: Bottle<Dependencies>) {
   register(bottle, 'InvestigationAPIDataSource', makeInvestigationAPI);
   register(bottle, 'LocationBankAPIDataSource', makeLocationBankAPI);
   register(bottle, 'OrgAPIDataSource', makeOrgAPI);
+  register(bottle, 'RoleAPIDataSource', makeRoleAPI);
   register(bottle, 'RuleAPIDataSource', makeRuleAPI);
   register(bottle, 'UserAPIDataSource', makeUserAPI);
 
@@ -67,9 +72,10 @@ function makeDataSources(deps: Dependencies) {
     investigationAPI: deps.InvestigationAPIDataSource,
     locationBankAPI: deps.LocationBankAPIDataSource,
     orgAPI: deps.OrgAPIDataSource,
+    roleAPI: deps.RoleAPIDataSource,
     ruleAPI: deps.RuleAPIDataSource,
     userAPI: deps.UserAPIDataSource,
-    notificationsAPI: new (class extends DataSource<unknown> {
+    notificationsAPI: new (class {
       private service = deps.NotificationsService;
       public async getNotificationsForUser(id: string) {
         return this.service.getNotificationsForUser(id);

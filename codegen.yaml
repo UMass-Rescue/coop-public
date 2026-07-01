@@ -26,6 +26,7 @@ generates:
       nonOptionalTypename: true
       useTypeImports: true
       enumsAsConst: true
+      generateSuspenseQuery: false
       # NB: on the client side, we can't use the built-in prefixing, since it
       # only supports types + document variables + fragments (e.g., there's no
       # option for prefixing hook names.
@@ -90,32 +91,31 @@ generates:
       # Don't change this; it makes type checking too permissive.
       allowParentTypeOverride: false
       mappers:
-        CustomAction: ../models/rules/ActionModel.js#CustomAction
-        EnqueueToMrtAction: ../models/rules/ActionModel.js#EnqueueToMrtAction
-        EnqueueToNcmecAction: ../models/rules/ActionModel.js#EnqueueToNcmecAction
-        EnqueueAuthorToMrtAction: ../models/rules/ActionModel.js#EnqueueAuthorToMrtAction
-        Backtest: ../models/rules/BacktestModel.js#Backtest
-        ContentType: ../models/rules/ItemTypeModel.js#ItemType
+        CustomAction: ../services/moderationConfigService/types/actions.js#CustomAction
+        EnqueueToMrtAction: ../services/moderationConfigService/types/actions.js#EnqueueToMrtAction
+        EnqueueToNcmecAction: ../services/moderationConfigService/types/actions.js#EnqueueToNcmecAction
+        EnqueueAuthorToMrtAction: ../services/moderationConfigService/types/actions.js#EnqueueAuthorToMrtAction
+        Backtest: ../graphql/datasources/ruleKyselyPersistence.js#GraphQLBacktestParent
+        ContentType: ../services/moderationConfigService/types/itemTypes.js#ItemType
         DerivedFieldSource: ../services/derivedFieldsService/helpers.js#DerivedFieldSpecSource
-        HashBank: ../models/HashBankModel.js#HashBank
-        Org: ../models/OrgModel.js#Org
-        # NB: for now we always resolve MatchingBanks with an Org model, and
-        # then call methods on the org model to resolve the sub-fields. This is
-        # a bit unusual, as matchingBanks could in theory be a standalone type,
-        # so we might have to expand this later.
-        MatchingBanks: ../models/OrgModel.js#Org
-        User: ../models/UserModel.js#User
+        HashBank: ../services/hmaService/index.js#HashBank
+        Org: ../graphql/datasources/orgKyselyPersistence.js#GraphQLOrgParent
+        # NB: `MatchingBanks` is currently resolved by returning the `Org`
+        # parent, and its sub-resolvers only read `org.id`. A bit unusual, as
+        # `MatchingBanks` could be a standalone type — may expand later.
+        MatchingBanks: ../graphql/datasources/orgKyselyPersistence.js#GraphQLOrgParent
+        User: ../graphql/datasources/userKyselyPersistence.js#GraphQLUserParent
         LocationBank: ./datasources/LocationBankApi.js#LocationBankWithoutFullPlacesAPIResponse
-        Rule: ../models/rules/RuleModel.js#Rule
+        Rule: ../graphql/datasources/ruleKyselyPersistence.js#GraphQLRuleParent
         Condition: ../services/moderationConfigService/index.js#Condition
-        ConditionWithResult: ../models/rules/RuleModel.js#ConditionWithResult
+        ConditionWithResult: ../services/moderationConfigService/index.js#ConditionWithResult
         ConditionSet: ../services/moderationConfigService/index.js#ConditionSet
-        ConditionSetWithResult: ../models/rules/RuleModel.js#ConditionSetWithResult
+        ConditionSetWithResult: ../services/moderationConfigService/index.js#ConditionSetWithResult
         LeafCondition: ../services/moderationConfigService/index.js#LeafCondition
-        LeafConditionWithResult: ../models/rules/RuleModel.js#LeafConditionWithResult
-        UserRule: ../models/rules/RuleModel.js#Rule
-        ContentRule: ../models/rules/RuleModel.js#Rule
-        RuleInsights: ../models/rules/RuleModel.js#Rule
+        LeafConditionWithResult: ../services/moderationConfigService/index.js#LeafConditionWithResult
+        UserRule: ../graphql/datasources/ruleKyselyPersistence.js#GraphQLRuleParent
+        ContentRule: ../graphql/datasources/ruleKyselyPersistence.js#GraphQLRuleParent
+        RuleInsights: ../graphql/datasources/ruleKyselyPersistence.js#GraphQLRuleParent
         Notification: ../services/notificationsService/notificationsService.js#Notification
         Signal: ../services/signalsService/index.js#Signal
         ManualReviewJobPayload: ../services/manualReviewToolService/index.js#ManualReviewJobPayload
@@ -149,6 +149,7 @@ generates:
         ItemTypeSchemaVariantInput: ../graphql/modules/itemType.js#ItemTypeSchemaVariantInputResolverValue
         ReportingInsights: ../graphql/modules/reporting.js#ReportingInsights
         ReportingRule: ../services/reportingService/ReportingRules.js#ReportingRuleWithoutVersion
+        Role: ../graphql/datasources/rolePersistence.js#RoleParent
         RoutingRule: ../services/manualReviewToolService/modules/JobRouting.js#RoutingRuleWithoutVersion
         ManualReviewJobComment: ../services/manualReviewToolService/modules/CommentOperations.js#ManualReviewJobComment
         UserItem: ./types.js#ItemSubmissionForGQL

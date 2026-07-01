@@ -8,7 +8,7 @@ import {
   type ScalarType,
   type ScalarTypeRuntimeType,
   type TaggedScalar,
-} from '@roostorg/types';
+} from '@roostorg/coop-types';
 
 import { hasOwn } from '../../utils/misc.js';
 import {
@@ -40,8 +40,8 @@ export function getValuesFromFields(
     return Array.isArray(fieldValue)
       ? fieldValue
       : fieldValue !== undefined
-      ? [fieldValue]
-      : [];
+        ? [fieldValue]
+        : [];
   });
 }
 
@@ -56,7 +56,7 @@ export function getFieldValueOrValues<T extends FieldType>(
       // because the type that TS infers when trying to generate a single,
       // callable signature for `getValues` is not correct (and has never as
       // its argument types).
-      fieldTypeHandlers[type as FieldType]
+      fieldTypeHandlers[type]
         .getValues(data[name] as never, container as never)
         .map(
           (value) =>

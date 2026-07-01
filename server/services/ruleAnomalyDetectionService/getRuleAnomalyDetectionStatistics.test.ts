@@ -10,7 +10,13 @@ import makeGetRuleAnomalyDetectionStatistics from './getRuleAnomalyDetectionStat
  * least makes sure we can't change inadvertently change the generated queries.
  */
 describe('getRuleAnomalyDetectionStatistics', () => {
-  let queryMock: MockedFn<(query: string, tracer: any, binds?: readonly unknown[]) => Promise<unknown[]>>;
+  let queryMock: MockedFn<
+    (
+      query: string,
+      tracer: unknown,
+      binds?: readonly unknown[],
+    ) => Promise<unknown[]>
+  >;
   let getRulePassStatistics: Dependencies['getRuleAnomalyDetectionStatistics'];
 
   beforeAll(() => {
@@ -26,7 +32,8 @@ describe('getRuleAnomalyDetectionStatistics', () => {
     ];
 
     // Scope of this is just the test suite, so mutation should be ok.
-    // eslint-disable-next-line better-mutation/no-mutation
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- jest.fn() defaults to a generic call signature; cast lets us use the typed "queryMock" declared above.
     queryMock = jest.fn() as any;
     queryMock.mockResolvedValue(queryResult);
 
@@ -39,9 +46,10 @@ describe('getRuleAnomalyDetectionStatistics', () => {
     };
 
     // Scope of this is just the test suite, so mutation should be ok.
-    // eslint-disable-next-line better-mutation/no-mutation
+
     getRulePassStatistics = makeGetRuleAnomalyDetectionStatistics(
       dataWarehouseMock,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the second injected arg (tracer) is unused by this code path; passing an empty object stub.
       {} as any,
     );
   });

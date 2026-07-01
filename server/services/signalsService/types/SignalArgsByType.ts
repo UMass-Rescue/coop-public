@@ -26,13 +26,16 @@ export type SignalArgsByType = Satisfies<
     [SignalType.GEO_CONTAINED_WITHIN]: undefined;
     [SignalType.USER_SCORE]: undefined;
     [SignalType.USER_STRIKE_VALUE]: undefined;
-    [SignalType.BENIGN_MODEL]: undefined;
+    [SignalType.OPEN_AI_GRAPHIC_VIOLENCE_IMAGE_MODEL]: undefined;
     [SignalType.OPEN_AI_GRAPHIC_VIOLENCE_TEXT_MODEL]: undefined;
     [SignalType.OPEN_AI_HATE_TEXT_MODEL]: undefined;
     [SignalType.OPEN_AI_HATE_THREATENING_TEXT_MODEL]: undefined;
+    [SignalType.OPEN_AI_SELF_HARM_IMAGE_MODEL]: undefined;
     [SignalType.OPEN_AI_SELF_HARM_TEXT_MODEL]: undefined;
+    [SignalType.OPEN_AI_SEXUAL_IMAGE_MODEL]: undefined;
     [SignalType.OPEN_AI_SEXUAL_MINORS_TEXT_MODEL]: undefined;
     [SignalType.OPEN_AI_SEXUAL_TEXT_MODEL]: undefined;
+    [SignalType.OPEN_AI_VIOLENCE_IMAGE_MODEL]: undefined;
     [SignalType.OPEN_AI_VIOLENCE_TEXT_MODEL]: undefined;
     [SignalType.SENTINEL_RARE_CLASS_AFFINITY]: undefined;
     [SignalType.ZENTROPI_LABELER]: undefined;
@@ -62,13 +65,16 @@ export type RuntimeSignalArgsByType = Satisfies<
     [SignalType.GEO_CONTAINED_WITHIN]: undefined;
     [SignalType.USER_SCORE]: undefined;
     [SignalType.USER_STRIKE_VALUE]: undefined;
-    [SignalType.BENIGN_MODEL]: undefined;
+    [SignalType.OPEN_AI_GRAPHIC_VIOLENCE_IMAGE_MODEL]: undefined;
     [SignalType.OPEN_AI_GRAPHIC_VIOLENCE_TEXT_MODEL]: undefined;
     [SignalType.OPEN_AI_HATE_TEXT_MODEL]: undefined;
     [SignalType.OPEN_AI_HATE_THREATENING_TEXT_MODEL]: undefined;
+    [SignalType.OPEN_AI_SELF_HARM_IMAGE_MODEL]: undefined;
     [SignalType.OPEN_AI_SELF_HARM_TEXT_MODEL]: undefined;
+    [SignalType.OPEN_AI_SEXUAL_IMAGE_MODEL]: undefined;
     [SignalType.OPEN_AI_SEXUAL_MINORS_TEXT_MODEL]: undefined;
     [SignalType.OPEN_AI_SEXUAL_TEXT_MODEL]: undefined;
+    [SignalType.OPEN_AI_VIOLENCE_IMAGE_MODEL]: undefined;
     [SignalType.OPEN_AI_VIOLENCE_TEXT_MODEL]: undefined;
     [SignalType.SENTINEL_RARE_CLASS_AFFINITY]: {
       /**

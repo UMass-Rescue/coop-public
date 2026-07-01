@@ -19,10 +19,9 @@ describe('Item Investigation Service', () => {
   beforeAll(async () => {
     // The mutation should be ok here since this is initial setup in a
     // beforeAll; it doesn't involve reset state for each test in the suite
-    /* eslint-disable better-mutation/no-mutation */
+
     ({ container } = await getBottle());
     itemInvestigationService = container.ItemInvestigationService;
-    /* eslint-enable better-mutation/no-mutation */
   });
   afterAll(async () => {
     await container.closeSharedResourcesForShutdown();
@@ -43,9 +42,11 @@ describe('Item Investigation Service', () => {
     const dummyOrgId = uid();
 
     await createOrg(
-      { Org: container.Sequelize.Org },
-      container.ModerationConfigService,
-      container.ApiKeyService,
+      {
+        KyselyPg: container.KyselyPg,
+        ModerationConfigService: container.ModerationConfigService,
+        ApiKeyService: container.ApiKeyService,
+      },
       dummyOrgId,
     );
 
@@ -124,9 +125,11 @@ describe('Item Investigation Service', () => {
     const dummyOrgId = uid();
 
     await createOrg(
-      { Org: container.Sequelize.Org },
-      container.ModerationConfigService,
-      container.ApiKeyService,
+      {
+        KyselyPg: container.KyselyPg,
+        ModerationConfigService: container.ModerationConfigService,
+        ApiKeyService: container.ApiKeyService,
+      },
       dummyOrgId,
     );
 

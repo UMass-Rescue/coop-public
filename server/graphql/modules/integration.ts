@@ -1,32 +1,25 @@
-import { AuthenticationError } from 'apollo-server-express';
-
 import { getIntegrationRegistry } from '../../services/integrationRegistry/index.js';
 import { Integration } from '../../services/signalsService/index.js';
+import { UserPermission } from '../../services/userManagementService/index.js';
 import { isCoopErrorOfType } from '../../utils/errors.js';
 import {
   makeIntegrationConfigUnsupportedIntegrationError,
+  type TIntegrationConfigWithMetadata,
 } from '../datasources/IntegrationApi.js';
-import type { TIntegrationConfigWithMetadata } from '../datasources/IntegrationApi.js';
 import {
   type GQLIntegrationConfig,
-  type GQLIntegrationMetadata,
   type GQLMutationResolvers,
   type GQLQueryResolvers,
 } from '../generated.js';
 import { type ResolverMap } from '../resolvers.js';
+import { forbiddenError, unauthenticatedError } from '../utils/errors.js';
 import { gqlErrorResult, gqlSuccessResult } from '../utils/gqlResult.js';
 
 const typeDefs = /* GraphQL */ `
   enum Integration {
-    AKISMET
     GOOGLE_CONTENT_SAFETY_API
-    L1GHT
-    MICROSOFT_AZURE_CONTENT_MODERATOR
-    OOPSPAM
     OPEN_AI
     SENTINEL
-    SIGHT_ENGINE
-    TWO_HAT
     ZENTROPI
   }
 
@@ -49,7 +42,7 @@ const typeDefs = /* GraphQL */ `
   }
 
   union IntegrationApiCredential =
-      GoogleContentSafetyApiIntegrationApiCredential
+    | GoogleContentSafetyApiIntegrationApiCredential
     | OpenAiIntegrationApiCredential
     | ZentropiIntegrationApiCredential
     | PluginIntegrationApiCredential
@@ -163,7 +156,7 @@ const typeDefs = /* GraphQL */ `
   }
 
   union SetIntegrationConfigResponse =
-      SetIntegrationConfigSuccessResponse
+    | SetIntegrationConfigSuccessResponse
     | IntegrationConfigTooManyCredentialsError
     | IntegrationNoInputCredentialsError
     | IntegrationEmptyInputCredentialsError
@@ -182,7 +175,7 @@ const typeDefs = /* GraphQL */ `
   }
 
   union IntegrationConfigQueryResponse =
-      IntegrationConfigSuccessResult
+    | IntegrationConfigSuccessResult
     | IntegrationConfigUnsupportedIntegrationError
 
   type Query {
@@ -205,7 +198,9 @@ const typeDefs = /* GraphQL */ `
   }
 `;
 
-const IntegrationApiCredential: ResolverMap<TIntegrationConfigWithMetadata['apiCredential']> = {
+const IntegrationApiCredential: ResolverMap<
+  TIntegrationConfigWithMetadata['apiCredential']
+> = {
   __resolveType(it) {
     const integrationName = (it as { name?: string }).name ?? '';
     switch (integrationName) {
@@ -226,7 +221,12 @@ const Query: GQLQueryResolvers = {
     try {
       const user = context.getUser();
       if (user == null) {
-        throw new AuthenticationError('Unauthenticated User');
+        throw unauthenticatedError('Unauthenticated User');
+      }
+      if (!user.getPermissions().includes(UserPermission.MANAGE_ORG)) {
+        throw forbiddenError(
+          'User does not have permission to view integration configs',
+        );
       }
 
       if (!getIntegrationRegistry().has(name)) {
@@ -258,15 +258,15 @@ const Query: GQLQueryResolvers = {
   async availableIntegrations(_, __, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Unauthenticated User');
+      throw unauthenticatedError('Unauthenticated User');
     }
-    return context.dataSources.integrationAPI.getAvailableIntegrations() as GQLIntegrationMetadata[];
+    return context.dataSources.integrationAPI.getAvailableIntegrations();
   },
 };
 
 const PluginIntegrationApiCredential = {
   credential(it: TIntegrationConfigWithMetadata['apiCredential']) {
-    return it as Record<string, unknown>;
+    return it;
   },
 };
 
@@ -275,7 +275,12 @@ const Mutation: GQLMutationResolvers = {
     try {
       const user = context.getUser();
       if (user == null) {
-        throw new AuthenticationError('Unauthenticated User');
+        throw unauthenticatedError('Unauthenticated User');
+      }
+      if (!user.getPermissions().includes(UserPermission.MANAGE_ORG)) {
+        throw forbiddenError(
+          'User does not have permission to update integration configs',
+        );
       }
       const newConfig = await context.dataSources.integrationAPI.setConfig(
         params.input,
@@ -304,12 +309,17 @@ const Mutation: GQLMutationResolvers = {
     try {
       const user = context.getUser();
       if (user == null) {
-        throw new AuthenticationError('Unauthenticated User');
+        throw unauthenticatedError('Unauthenticated User');
+      }
+      if (!user.getPermissions().includes(UserPermission.MANAGE_ORG)) {
+        throw forbiddenError(
+          'User does not have permission to update integration configs',
+        );
       }
       const newConfig =
         await context.dataSources.integrationAPI.setConfigByIntegrationId(
           params.input.integrationId,
-          params.input.credential as Record<string, unknown>,
+          params.input.credential,
           user.orgId,
         );
 

@@ -1,8 +1,5 @@
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
-import { type Exception } from '@opentelemetry/api';
-import { DataSource } from 'apollo-datasource';
-import { uid } from 'uid';
 
 import { inject, type Dependencies } from '../../iocContainer/index.js';
 import { CoopEmailAddress } from '../../services/sendEmailService/index.js';
@@ -10,22 +7,31 @@ import { b64EncodeArrayBuffer } from '../../utils/encoding.js';
 import {
   CoopError,
   ErrorType,
-  type ErrorInstanceData,
   isCoopErrorOfType,
+  makeBadRequestError,
+  type ErrorInstanceData,
 } from '../../utils/errors.js';
 import { WEEK_MS } from '../../utils/time.js';
+import { type GQLInviteUserInput } from '../generated.js';
 import {
-  type GQLInviteUserInput,
-  type GQLMutationCreateOrgArgs,
-  type GQLRequestDemoInput,
-} from '../generated.js';
+  kyselyOrgFindById,
+  kyselyOrgUpdate,
+  type GraphQLOrgParent,
+} from './orgKyselyPersistence.js';
+import {
+  validateOrgUpdatePatch,
+  type OrgValidationFailure,
+} from './orgValidation.js';
+import {
+  kyselyUserListByOrg,
+  type GraphQLUserParent,
+} from './userKyselyPersistence.js';
 
-class OrgAPI extends DataSource {
+class OrgAPI {
   constructor(
     private readonly orgCreationLogger: Dependencies['OrgCreationLogger'],
     private readonly apiKeyService: Dependencies['ApiKeyService'],
     private readonly sendEmail: Dependencies['sendEmail'],
-    private readonly sequelize: Dependencies['Sequelize'],
     private readonly signingKeyPairService: Dependencies['SigningKeyPairService'],
     private readonly tracer: Dependencies['Tracer'],
     private readonly moderationConfigService: Dependencies['ModerationConfigService'],
@@ -33,78 +39,16 @@ class OrgAPI extends DataSource {
     private readonly config: Dependencies['ConfigService'],
     private readonly orgSettingsService: Dependencies['OrgSettingsService'],
     private readonly manualReviewToolService: Dependencies['ManualReviewToolService'],
-  ) {
-    super();
-  }
-
-  async createOrg(params: GQLMutationCreateOrgArgs) {
-    const { email, name, website } = params.input;
-    const existingOrgByName = await this.sequelize.Org.findOne({
-      where: { name },
-    });
-    if (existingOrgByName != null) {
-      throw makeOrgNameExistsError({ shouldErrorSpan: true });
-    }
-    const existingOrgByEmail = await this.sequelize.Org.findOne({
-      where: { email },
-    });
-
-    if (existingOrgByEmail != null) {
-      throw makeOrgEmailExistsError({ shouldErrorSpan: true });
-    }
-
-    const id = uid();
-
-    // Create api key before inserting the org, so we don't have to worry about
-    // the possibility of orgs existing without an api key.
-    // TODO: if org fails to save later, delete orphaned api key.
-    const { record } = await this.apiKeyService.createApiKey(
-      id,
-      'Main API Key',
-      'Primary API key for organization',
-      null
-    );
-
-    // TODO: if org fails to save later, delete orphaned signing key pair
-    await this.signingKeyPairService.createAndStoreSigningKeys(id);
-
-    try {
-      const org = await this.sequelize.Org.create({
-        id,
-        email,
-        name,
-        websiteUrl: website,
-        apiKeyId: record.id,
-      });
-
-      await Promise.all([
-        // This should ideally be done in one transaction, but we can update
-        // this after we move off of sequelize
-        this.moderationConfigService.createDefaultUserType(id),
-        this.orgCreationLogger.logOrgCreated(id, name, email, website),
-        this.userManagementService.upsertOrgDefaultUserInterfaceSettings({
-          orgId: id,
-        }),
-        this.orgSettingsService.upsertOrgDefaultSettings({ orgId: id }),
-        this.manualReviewToolService.upsertDefaultSettings({ orgId: id }),
-      ]);
-
-      return org;
-    } catch (e) {
-      const activeSpan = this.tracer.getActiveSpan();
-      if (activeSpan?.isRecording()) {
-        activeSpan.recordException(e as Exception);
-      }
-      throw e;
-    }
-  }
+    private readonly kysely: Dependencies['KyselyPg'],
+  ) {}
 
   // Create invite token and optionally send email
   async inviteUser(input: GQLInviteUserInput, orgId: string) {
     const { email, role } = input;
-    const org = await this.sequelize.Org.findByPk(orgId, {
-      rejectOnEmpty: true,
-    });
+    const org = await kyselyOrgFindById(this.kysely, orgId);
+    if (org == null) {
+      throw new Error(`Organization not found: ${orgId}`);
+    }
 
     const token = await this.userManagementService.createInviteUserToken({
       email,
@@ -129,7 +73,10 @@ class OrgAPI extends DataSource {
     } catch (error: unknown) {
       // Even if email fails, return the token so it can be copied
       // eslint-disable-next-line no-console
-      console.warn('Failed to send invite email, but token was created:', error);
+      console.warn(
+        'Failed to send invite email, but token was created:',
+        error,
+      );
     }
     return token;
   }
@@ -155,30 +102,12 @@ class OrgAPI extends DataSource {
     return token;
   }
 
-  async requestDemo(input: GQLRequestDemoInput) {
-    const { email, company, website, interests, ref, isFromGoogleAds } = input;
-    const msg = {
-      to: CoopEmailAddress.Support,
-      from: CoopEmailAddress.NoReply,
-      subject: '[URGENT] Demo Request',
-      text: `A new potential user has requested a Coop demo.\n\nEmail address: ${email}\n\nCompany name: ${company}\n\nCompany website: ${website}\n\nInterests: ${interests.join(
-        ', ',
-      )} \n\nRef: ${ref} \n\nIs from Google Ads: ${isFromGoogleAds}`,
-    };
-    try {
-      await this.sendEmail(msg);
-    } catch (error: unknown) {
-      return false;
+  async getGraphQLOrgFromId(id: string): Promise<GraphQLOrgParent> {
+    const org = await kyselyOrgFindById(this.kysely, id);
+    if (org == null) {
+      throw new Error(`Organization not found: ${id}`);
     }
-    return true;
-  }
-
-  async getGraphQLOrgFromId(id: string) {
-    return this.sequelize.Org.findByPk(id, { rejectOnEmpty: true });
-  }
-
-  async getAllGraphQLOrgs() {
-    return this.sequelize.Org.findAll();
+    return org;
   }
 
   async updateOrgInfo(
@@ -189,28 +118,31 @@ class OrgAPI extends DataSource {
       websiteUrl?: string | null;
       onCallAlertEmail?: string | null;
     },
-  ) {
-    const org = await this.sequelize.Org.findByPk(orgId);
-    if (!org) {
+  ): Promise<GraphQLOrgParent> {
+    const validation = validateOrgUpdatePatch(input);
+    if (!validation.ok) {
+      throw orgValidationFailureToBadRequestError(validation.failure);
+    }
+
+    const updated = await kyselyOrgUpdate(this.kysely, orgId, {
+      name: input.name ?? undefined,
+      email: input.email ?? undefined,
+      websiteUrl: input.websiteUrl ?? undefined,
+      onCallAlertEmail: input.onCallAlertEmail,
+    });
+    if (updated == null) {
       throw new Error('Organization not found');
     }
 
-    if (input.name != null) {
-      org.name = input.name;
-    }
-    if (input.email != null) {
-      org.email = input.email;
-    }
-    if (input.websiteUrl != null && input.websiteUrl !== '') {
-      org.websiteUrl = input.websiteUrl;
-    }
-    if (input.onCallAlertEmail !== undefined) {
-      org.onCallAlertEmail = input.onCallAlertEmail ?? undefined;
-    }
+    return updated;
+  }
 
-    await org.save();
+  async getContentTypesForOrg(orgId: string) {
+    return this.moderationConfigService.getItemTypes({ orgId });
+  }
 
-    return org;
+  async getOrgUsersForGraphQL(orgId: string): Promise<GraphQLUserParent[]> {
+    return kyselyUserListByOrg(this.kysely, orgId);
   }
 
   // TODO: ApiKeyService should maybe be its own dataSource,
@@ -236,9 +168,8 @@ class OrgAPI extends DataSource {
   async getPublicSigningKeyPem(orgId: string) {
     let key: CryptoKey;
     try {
-      key = await this.signingKeyPairService.getSignatureVerificationInfo(
-        orgId,
-      );
+      key =
+        await this.signingKeyPairService.getSignatureVerificationInfo(orgId);
     } catch (error) {
       if (isCoopErrorOfType(error, 'SigningKeyPairNotFound')) {
         key = await this.signingKeyPairService.createAndStoreSigningKeys(orgId);
@@ -264,28 +195,15 @@ class OrgAPI extends DataSource {
 }
 
 export type OrgErrorType =
-  | 'OrgWithEmailExistsError'
-  | 'OrgWithNameExistsError'
   | 'InviteUserTokenExpiredError'
   | 'InviteUserTokenMissingError';
 
-export const makeOrgEmailExistsError = (data: ErrorInstanceData) =>
-  new CoopError({
-    status: 409,
-    type: [ErrorType.UniqueViolation],
-    title: 'An org with this email already exists',
-    name: 'OrgWithEmailExistsError',
-    ...data,
+function orgValidationFailureToBadRequestError(failure: OrgValidationFailure) {
+  return makeBadRequestError(failure.message, {
+    pointer: `/input/${failure.field}`,
+    shouldErrorSpan: false,
   });
-
-export const makeOrgNameExistsError = (data: ErrorInstanceData) =>
-  new CoopError({
-    status: 409,
-    type: [ErrorType.UniqueViolation],
-    title: 'An org with this name already exists',
-    name: 'OrgWithNameExistsError',
-    ...data,
-  });
+}
 
 export const makeInviteUserTokenExpiredError = (data: ErrorInstanceData) =>
   new CoopError({
@@ -310,7 +228,6 @@ export default inject(
     'OrgCreationLogger',
     'ApiKeyService',
     'sendEmail',
-    'Sequelize',
     'SigningKeyPairService',
     'Tracer',
     'ModerationConfigService',
@@ -318,6 +235,7 @@ export default inject(
     'ConfigService',
     'OrgSettingsService',
     'ManualReviewToolService',
+    'KyselyPg',
   ],
   OrgAPI,
 );

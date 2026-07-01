@@ -1,4 +1,3 @@
-import { AuthenticationError } from 'apollo-server-core';
 // because graphql args are sometimes imported wiht _, we use
 // lodash as opposed to _ to avoid overloading
 import lodash from 'lodash';
@@ -13,6 +12,7 @@ import type {
   GQLRuleExecutionResultResolvers,
   GQLRuleInsightsResolvers,
 } from '../generated.js';
+import { unauthenticatedError } from '../utils/errors.js';
 import { gqlErrorResult, gqlSuccessResult } from '../utils/gqlResult.js';
 
 const typeDefs = /* GraphQL */ `
@@ -115,7 +115,7 @@ const typeDefs = /* GraphQL */ `
 
   union GetFullResultForItemResponse = RuleExecutionResult | NotFoundError
   union GetFullReportingRuleResultForItemResponse =
-      ReportingRuleExecutionResult
+    | ReportingRuleExecutionResult
     | NotFoundError
 `;
 
@@ -123,7 +123,7 @@ const RuleExecutionResult: GQLRuleExecutionResultResolvers = {
   async signalResults(ruleExecutionResult, _, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
     }
 
     const fullResults = ruleExecutionResult.result;
@@ -139,7 +139,7 @@ const ReportingRuleExecutionResult: GQLReportingRuleExecutionResultResolvers = {
   async signalResults(reportingRuleExecutionResult, _, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
     }
 
     const fullResults = reportingRuleExecutionResult.result;
@@ -155,7 +155,7 @@ const RuleInsights: GQLRuleInsightsResolvers = {
   async passRateData(rule, args, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
     }
 
     return context.dataSources.ruleAPI.ruleInsights.getRulePassRateData(
@@ -167,7 +167,7 @@ const RuleInsights: GQLRuleInsightsResolvers = {
   async latestVersionSamples(rule, _args, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
     }
 
     const samples =
@@ -180,10 +180,10 @@ const RuleInsights: GQLRuleInsightsResolvers = {
         },
       );
 
-    // TODO: remove any cast. It's hiding that there are legit fields missing
-    // here, meaning that graphql queries would throw an exception if asking for
-    // those fields. To provide them, we'll have to update (and add better
-    // typings for) getRulePassingContentSamples.
+    // TODO: type this properly. graphql queries would throw an exception if
+    // asking for fields that aren't populated here. To provide them, we'll
+    // have to update (and add better typings for) getRulePassingContentSamples.
+    /* eslint-disable @typescript-eslint/no-explicit-any -- see TODO above */
     return samples.map((it) => ({
       ...it,
       itemId: it.contentId,
@@ -193,11 +193,12 @@ const RuleInsights: GQLRuleInsightsResolvers = {
       ruleId: rule.id,
       ruleName: rule.name,
     })) as any[];
+    /* eslint-enable @typescript-eslint/no-explicit-any */
   },
   async priorVersionSamples(rule, _args, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
     }
 
     const samples =
@@ -210,10 +211,8 @@ const RuleInsights: GQLRuleInsightsResolvers = {
         },
       );
 
-    // TODO: remove any cast. It's hiding that there are legit fields missing
-    // here, meaning that graphql queries would throw an exception if asking for
-    // those fields. To provide them, we'll have to update (and add better
-    // typings for) getRulePassingContentSamples.
+    // TODO: type this properly. See latestVersionSamples for context.
+    /* eslint-disable @typescript-eslint/no-explicit-any -- see TODO above */
     return samples.map((it) => ({
       ...it,
       itemId: it.contentId,
@@ -223,6 +222,7 @@ const RuleInsights: GQLRuleInsightsResolvers = {
       ruleId: rule.id,
       ruleName: rule.name,
     })) as any[];
+    /* eslint-enable @typescript-eslint/no-explicit-any */
   },
 };
 
@@ -230,7 +230,7 @@ const ReportingRuleInsights: GQLReportingRuleInsightsResolvers = {
   async passRateData(rule, args, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
     }
 
     return context.dataSources.ruleAPI.ruleInsights.getRulePassRateData(
@@ -242,7 +242,7 @@ const ReportingRuleInsights: GQLReportingRuleInsightsResolvers = {
   async latestVersionSamples(rule, _args, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
     }
 
     const samples =
@@ -255,10 +255,10 @@ const ReportingRuleInsights: GQLReportingRuleInsightsResolvers = {
         },
       );
 
-    // TODO: remove any cast. It's hiding that there are legit fields missing
-    // here, meaning that graphql queries would throw an exception if asking for
-    // those fields. To provide them, we'll have to update (and add better
-    // typings for) getRulePassingContentSamples.
+    // TODO: type this properly. graphql queries would throw an exception if
+    // asking for fields that aren't populated here. To provide them, we'll
+    // have to update (and add better typings for) getRulePassingContentSamples.
+    /* eslint-disable @typescript-eslint/no-explicit-any -- see TODO above */
     return samples.map((it) => ({
       ...it,
       itemId: it.contentId,
@@ -268,11 +268,12 @@ const ReportingRuleInsights: GQLReportingRuleInsightsResolvers = {
       ruleId: rule.id,
       ruleName: rule.name,
     })) as any[];
+    /* eslint-enable @typescript-eslint/no-explicit-any */
   },
   async priorVersionSamples(rule, _args, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
     }
 
     const samples =
@@ -285,10 +286,8 @@ const ReportingRuleInsights: GQLReportingRuleInsightsResolvers = {
         },
       );
 
-    // TODO: remove any cast. It's hiding that there are legit fields missing
-    // here, meaning that graphql queries would throw an exception if asking for
-    // those fields. To provide them, we'll have to update (and add better
-    // typings for) getRulePassingContentSamples.
+    // TODO: type this properly. See latestVersionSamples for context.
+    /* eslint-disable @typescript-eslint/no-explicit-any -- see TODO above */
     return samples.map((it) => ({
       ...it,
       itemId: it.contentId,
@@ -298,6 +297,7 @@ const ReportingRuleInsights: GQLReportingRuleInsightsResolvers = {
       ruleId: rule.id,
       ruleName: rule.name,
     })) as any[];
+    /* eslint-enable @typescript-eslint/no-explicit-any */
   },
 };
 
@@ -305,7 +305,7 @@ const Query: GQLQueryResolvers = {
   async getUserStrikeCountDistribution(_, __, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
     }
 
     const allUserStrikeCounts =
@@ -313,7 +313,7 @@ const Query: GQLQueryResolvers = {
         user.orgId,
       );
     const bucketedStrikeCounts = lodash.countBy(
-      allUserStrikeCounts,
+      allUserStrikeCounts.filter((it) => it.strike_count > 0),
       (it) => it.strike_count,
     );
     return Object.entries(bucketedStrikeCounts).map((bucket) => ({
@@ -324,7 +324,7 @@ const Query: GQLQueryResolvers = {
   async getFullRuleResultForItem(_, { input }, context) {
     const user = context.getUser();
     if (user == null) {
-      throw new AuthenticationError('Authenticated user required');
+      throw unauthenticatedError('Authenticated user required');
     }
     const { ruleId, item, date, lookback } = input;
     try {
@@ -346,12 +346,11 @@ const Query: GQLQueryResolvers = {
 
       const result = samples[0];
 
+      // TODO: type this properly. graphql queries would throw an exception if
+      // asking for fields that aren't populated here. To provide them, we'll
+      // have to update (and add better typings for) getRulePassingContentSamples.
+      /* eslint-disable @typescript-eslint/no-explicit-any -- see TODO above */
       return gqlSuccessResult(
-        // TODO: remove any cast. It's hiding that there are legit fields missing
-        // here, meaning that graphql queries would throw an exception if asking for
-        // those fields. To provide them, we'll have to update (and add better
-        // typings for) getRulePassingContentSamples.
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
         {
           ...result,
           itemId: result.contentId,
@@ -363,6 +362,7 @@ const Query: GQLQueryResolvers = {
         } as any,
         'RuleExecutionResult',
       );
+      /* eslint-enable @typescript-eslint/no-explicit-any */
     } catch (e) {
       if (isCoopErrorOfType(e, 'NotFoundError')) {
         return gqlErrorResult(e);

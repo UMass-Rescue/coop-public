@@ -1,14 +1,13 @@
-/* eslint-disable max-lines */
-import { type ConsumerDirectives } from '../../lib/cache/index.js';
 import { type ReadonlyDeep, type Simplify } from 'type-fest';
 
 import { inject, type Dependencies } from '../../iocContainer/index.js';
-import { isTaggedItemData } from '../../models/rules/item-type-fields.js';
+import { type ConsumerDirectives } from '../../lib/cache/index.js';
 import { jsonStringify } from '../../utils/encoding.js';
 import { CoopError, ErrorType, makeNotFoundError } from '../../utils/errors.js';
 import { __throw, assertUnreachable } from '../../utils/misc.js';
 import { type CollapseCases } from '../../utils/typescript-types.js';
 import { getIntegrationRegistry } from '../integrationRegistry/index.js';
+import { isTaggedItemData } from '../moderationConfigService/index.js';
 import { instantiateBuiltInSignals } from './helpers/instantiateBuiltInSignals.js';
 import { loadPluginSignals } from './helpers/loadPluginSignals.js';
 import { makeCachedCredentialGetters } from './helpers/makeCachedCredentialsGetters.js';
@@ -60,12 +59,7 @@ const publicSignalProps = [
  */
 export type Signal = Simplify<
   Pick<
-    SignalBase<
-      SignalInputType,
-      SignalOutputType,
-      unknown,
-      SignalType | string
-    >,
+    SignalBase<SignalInputType, SignalOutputType, unknown, SignalType | string>,
     (typeof publicSignalProps)[number]
   >
 >;
@@ -139,10 +133,7 @@ export class SignalsService {
     const cachedCredentialGetters =
       makeCachedCredentialGetters(signalAuthService);
 
-    const cachedFetchers = makeCachedFetchers(
-      fetchHTTP,
-      tracer,
-    );
+    const cachedFetchers = makeCachedFetchers(fetchHTTP, tracer);
 
     this.builtInSignalsByType = instantiateBuiltInSignals(
       cachedCredentialGetters,
@@ -153,12 +144,15 @@ export class SignalsService {
       this.getPoliciesByIdEventuallyConsistent,
       this.hmaService,
       itemInvestigationService,
+      fetchHTTP,
     );
 
     const pluginEntries = getIntegrationRegistry().getPluginEntries();
     const pluginSignals = loadPluginSignals(pluginEntries, signalAuthService);
     const builtInIds = new Set(Object.keys(this.builtInSignalsByType));
-    const collision = Object.keys(pluginSignals).find((id) => builtInIds.has(id));
+    const collision = Object.keys(pluginSignals).find((id) =>
+      builtInIds.has(id),
+    );
     if (collision != null) {
       throw new Error(
         `Plugin signal type "${collision}" collides with a built-in signal; use a different signalTypeId.`,
@@ -248,7 +242,7 @@ export class SignalsService {
    * `type` given in `opts.signal.type`. I.e., the type of the signal id and the
    * type of the `input` must be correlated. The type signature used here _does_
    * capture that, and will work very well if `T` is instantiated with a single
-   * signal type. Eg, `runSignal<"BENIGN_MODEL">(..)` gives very good inferred
+   * signal type. Eg, `runSignal<"USER_SCORE">(..)` gives very good inferred
    * argument types. However, when `T` is not known precisely at compile time at
    * the call site, this argument type is gonna be very hard to satisfy (and
    * rightfully so -- the call probably isn't type safe), so the caller will
@@ -303,8 +297,8 @@ export class SignalsService {
       'value' in input.value
         ? input.value.type
         : isTaggedItemData(input.value)
-        ? 'FULL_ITEM'
-        : assertUnreachable(input.value, 'Unknown signal input...');
+          ? 'FULL_ITEM'
+          : assertUnreachable(input.value, 'Unknown signal input...');
 
     if (!signal.eligibleInputs.includes(signalInputType)) {
       throw new CoopError({
@@ -320,23 +314,25 @@ export class SignalsService {
       });
     }
 
-    // When we look up the signal with `#getSignalInstance` above, TS thinks
-    // (correctly) that we could get any signal back, but it loses track of the
-    // relationship between the signal we get back and the type of the `input`.
-    // So, when we call `signal.run()` it tries to check that the `input` is a
-    // type that _any_ signal would accept. However, there is no type that'll
-    // work as every signal's input (e.g, because some signals demand text input
-    // and some demand an image reference), so it'll only let us make this call
-    // if we cast the input to `never` (which is the intersection of every
-    // signal's input type).
-    return signal.run(input as never) as Promise<
+    // `#getSignalInstance` returns a signal whose input type is the union of
+    // every signal's input, so TS loses the relationship between the looked-up
+    // signal and the caller's `input`. The cast on the return value restores
+    // the expected output type for this signal type `T`; the runtime call is
+    // sound because we already validated `signalInputType` against
+    // `signal.eligibleInputs` above.
+    return signal.run(input) as Promise<
       Awaited<SignalTypesToRunOutputTypes[T]>
     >;
   }
 
   #signalInstanceToPublicSignal(
     it: ReadonlyDeep<
-      SignalBase<SignalInputType, SignalOutputType, unknown, SignalType | string>
+      SignalBase<
+        SignalInputType,
+        SignalOutputType,
+        unknown,
+        SignalType | string
+      >
     >,
   ) {
     // This used to be implemented as simply `safePick(it, publicSignalProps)`,

@@ -6,7 +6,7 @@ import {
   ScalarTypes,
   TaggedScalar,
   type FieldType,
-} from '@roostorg/types';
+} from '@roostorg/coop-types';
 import { JsonObject } from 'type-fest';
 
 import { GQLBaseField, GQLSchemaFieldRoles } from '../graphql/generated';
@@ -82,7 +82,7 @@ export function getFieldValueForRole<
   if (Array.isArray(fieldValue)) {
     throw new Error('Unexpected array when getting field value');
   }
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+
   return fieldValue.value satisfies ScalarTypeRuntimeType<ScalarType> as ScalarTypeRuntimeType<
     FieldRoleToScalarType[Role & keyof FieldRoleToScalarType]
   >;

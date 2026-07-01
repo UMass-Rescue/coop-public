@@ -1,13 +1,13 @@
 import { ScalarTypes } from '@roostorg/types';
 
+import {
+  SentinelServiceError,
+  type SentinelService,
+} from '../../../../sentinelService/sentinelService.js';
 import { Integration } from '../../../types/Integration.js';
 import { SignalPricingStructure } from '../../../types/SignalPricingStructure.js';
 import { SignalType } from '../../../types/SignalType.js';
 import { type SignalInput } from '../../SignalBase.js';
-import {
-  type SentinelService,
-  SentinelServiceError,
-} from '../../../../sentinelService/sentinelService.js';
 import SentinelRareClassAffinitySignal from './SentinelRareClassAffinitySignal.js';
 
 type SentinelSignalInput = SignalInput<
@@ -34,7 +34,9 @@ function makeSentinelService(
   overrides: Partial<SentinelService> = {},
 ): SentinelService {
   return {
-    healthCheck: jest.fn().mockResolvedValue({ status: 'ok', banks_loaded: true }),
+    healthCheck: jest
+      .fn()
+      .mockResolvedValue({ status: 'ok', banks_loaded: true }),
     getBanksStatus: jest.fn().mockResolvedValue({ loaded: true }),
     scoreTexts: jest.fn().mockResolvedValue({
       rare_class_affinity_score: 0.5,
@@ -92,7 +94,9 @@ function makeSignal(
 describe('SentinelRareClassAffinitySignal', () => {
   describe('signal metadata', () => {
     it('returns correct id', () => {
-      expect(makeSignal().id).toEqual({ type: SignalType.SENTINEL_RARE_CLASS_AFFINITY });
+      expect(makeSignal().id).toEqual({
+        type: SignalType.SENTINEL_RARE_CLASS_AFFINITY,
+      });
     });
 
     it('returns correct integration', () => {
@@ -104,7 +108,9 @@ describe('SentinelRareClassAffinitySignal', () => {
     });
 
     it('returns NUMBER as output type', () => {
-      expect(makeSignal().outputType).toEqual({ scalarType: ScalarTypes.NUMBER });
+      expect(makeSignal().outputType).toEqual({
+        scalarType: ScalarTypes.NUMBER,
+      });
     });
 
     it('returns FREE pricing structure', () => {
@@ -140,7 +146,9 @@ describe('SentinelRareClassAffinitySignal', () => {
 
     it('returns disabled=true when health check fails', async () => {
       const signal = makeSignal({
-        healthCheck: jest.fn().mockRejectedValue(new Error('Connection refused')),
+        healthCheck: jest
+          .fn()
+          .mockRejectedValue(new Error('Connection refused')),
       });
       const info = await signal.getDisabledInfo('org-1');
       expect(info.disabled).toBe(true);
@@ -149,7 +157,9 @@ describe('SentinelRareClassAffinitySignal', () => {
 
     it('returns disabled=true when health status is not ok', async () => {
       const signal = makeSignal({
-        healthCheck: jest.fn().mockResolvedValue({ status: 'error', banks_loaded: false }),
+        healthCheck: jest
+          .fn()
+          .mockResolvedValue({ status: 'error', banks_loaded: false }),
       });
       const info = await signal.getDisabledInfo('org-1');
       expect(info.disabled).toBe(true);
@@ -178,7 +188,9 @@ describe('SentinelRareClassAffinitySignal', () => {
       const result = await signal.run(makeInput());
 
       expect(scoreTexts).toHaveBeenCalledWith(
-        expect.objectContaining({ texts: expect.arrayContaining(['test content']) }),
+        expect.objectContaining({
+          texts: expect.arrayContaining(['test content']),
+        }),
       );
       expect(result).toMatchObject({
         outputType: { scalarType: ScalarTypes.NUMBER },
@@ -202,13 +214,11 @@ describe('SentinelRareClassAffinitySignal', () => {
         priorSubmissions: undefined,
         parents: (async function* () {})(),
       };
-      const getThreadSubmissionsByTime = jest
-        .fn()
-        .mockReturnValue(
-          (async function* () {
-            yield threadItem;
-          })(),
-        );
+      const getThreadSubmissionsByTime = jest.fn().mockReturnValue(
+        (async function* () {
+          yield threadItem;
+        })(),
+      );
 
       const signal = makeSignal({ scoreTexts }, { getThreadSubmissionsByTime });
 
@@ -255,7 +265,9 @@ describe('SentinelRareClassAffinitySignal', () => {
 
     it('returns an error result when Sentinel service throws SentinelServiceError', async () => {
       const signal = makeSignal({
-        scoreTexts: jest.fn().mockRejectedValue(new SentinelServiceError('Banks not loaded', 503)),
+        scoreTexts: jest
+          .fn()
+          .mockRejectedValue(new SentinelServiceError('Banks not loaded', 503)),
       });
       const result = await signal.run(makeInput());
       expect(result.type).toBe('ERROR');

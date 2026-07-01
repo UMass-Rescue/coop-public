@@ -1,5 +1,4 @@
-
-import { Queue, Worker as BullWorker, type Job as BullJob } from 'bullmq';
+import { Worker as BullWorker, Queue, type Job as BullJob } from 'bullmq';
 import { type Cluster } from 'ioredis';
 import type IORedis from 'ioredis';
 
@@ -23,6 +22,7 @@ export default inject(
     'ContentApiLogger',
     'ModerationConfigService',
     'ItemInvestigationService',
+    'Scylla',
     'Meter',
     'itemSubmissionRetryQueueBulkWrite',
   ],
@@ -33,6 +33,7 @@ export default inject(
     contentApiLogger,
     moderationConfigService,
     ItemInvestigationService,
+    scylla,
     Meter,
     itemSubmissionRetryQueueBulkWrite,
   ) => {
@@ -42,6 +43,8 @@ export default inject(
     return {
       type: 'Worker' as const,
       async run(_signal) {
+        // Fail fast if Scylla is unreachable, instead of retry-looping per job.
+        await scylla.connect();
         queue = new Queue(ITEM_SUBMISSION_QUEUE_NAME, { connection: redis });
         const insertWithRetries = tracer.traced(
           {
@@ -147,11 +150,14 @@ export default inject(
                     performance.now() - jobStartTime,
                   );
 
-                  queue!.getJobCounts('waiting', 'active').then((counts) => {
-                    Meter.itemProcessingQueueDepth.record(
-                      counts.waiting + counts.active,
-                    );
-                  }).catch(() => {});
+                  queue!
+                    .getJobCounts('waiting', 'active')
+                    .then((counts) => {
+                      Meter.itemProcessingQueueDepth.record(
+                        counts.waiting + counts.active,
+                      );
+                    })
+                    .catch(() => {});
                 } catch (e: unknown) {
                   tracer.logActiveSpanFailedIfAny(e);
                   Meter.itemProcessingFailuresCounter.add(1, {

@@ -2,11 +2,203 @@
 # package ecosystems to update and where the package manifests are located.
 # Please see the documentation for all configuration options:
 # https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+#
+# Major version updates are disabled for now across every ecosystem/directory.
+# Security updates are unaffected (Dependabot ignores `ignore` rules for
+# security advisories), so majors still land when they fix a vulnerability.
 
 version: 2
 updates:
   # Enable version updates for Docker
-  - package-ecosystem: "docker"
-    directory: "/"
+  - package-ecosystem: 'docker'
+    directories:
+      - '/'
+      - '/client'
+      - '/db'
+      - '/hma'
+      - '/nodejs-instrumentation'
     schedule:
-      interval: "weekly"
+      interval: 'weekly'
+    cooldown:
+      default-days: 7
+    labels:
+      - 'dependencies'
+      - 'dependabot'
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
+
+  # Enable version updates for npm
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    cooldown:
+      default-days: 7
+    labels:
+      - 'dependencies'
+      - 'dependabot'
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
+    groups:
+      root-prod-security:
+        dependency-type: 'production'
+        applies-to: 'security-updates'
+        patterns:
+          - '*'
+      root-prod:
+        dependency-type: 'production'
+        applies-to: 'version-updates'
+        patterns:
+          - '*'
+      root-dev:
+        dependency-type: 'development'
+        applies-to: 'version-updates'
+        patterns:
+          - '*'
+
+  - package-ecosystem: 'npm'
+    directory: '/db'
+    schedule:
+      interval: 'weekly'
+    cooldown:
+      default-days: 7
+    labels:
+      - 'dependencies'
+      - 'dependabot'
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
+    groups:
+      db-prod-security:
+        dependency-type: 'production'
+        applies-to: 'security-updates'
+        patterns:
+          - '*'
+      db-prod:
+        dependency-type: 'production'
+        applies-to: 'version-updates'
+        patterns:
+          - '*'
+      db-dev:
+        dependency-type: 'development'
+        applies-to: 'version-updates'
+        patterns:
+          - '*'
+
+  - package-ecosystem: 'npm'
+    directory: '/migrator'
+    schedule:
+      interval: 'weekly'
+    cooldown:
+      default-days: 7
+    labels:
+      - 'dependencies'
+      - 'dependabot'
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
+    groups:
+      migrator-prod-security:
+        dependency-type: 'production'
+        applies-to: 'security-updates'
+        patterns:
+          - '*'
+      migrator-prod:
+        dependency-type: 'production'
+        applies-to: 'version-updates'
+        patterns:
+          - '*'
+      migrator-dev:
+        dependency-type: 'development'
+        applies-to: 'version-updates'
+        patterns:
+          - '*'
+
+  - package-ecosystem: 'npm'
+    directory: '/server'
+    schedule:
+      interval: 'weekly'
+    cooldown:
+      default-days: 7
+    labels:
+      - 'dependencies'
+      - 'dependabot'
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
+    groups:
+      server-prod-security:
+        dependency-type: 'production'
+        applies-to: 'security-updates'
+        patterns:
+          - '*'
+      server-prod:
+        dependency-type: 'production'
+        applies-to: 'version-updates'
+        patterns:
+          - '*'
+      server-dev:
+        dependency-type: 'development'
+        applies-to: 'version-updates'
+        patterns:
+          - '*'
+
+  - package-ecosystem: 'npm'
+    directory: '/client'
+    schedule:
+      interval: 'weekly'
+    cooldown:
+      default-days: 7
+    labels:
+      - 'dependencies'
+      - 'dependabot'
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
+    groups:
+      client-prod-security:
+        dependency-type: 'production'
+        applies-to: 'security-updates'
+        patterns:
+          - '*'
+      client-prod:
+        dependency-type: 'production'
+        applies-to: 'version-updates'
+        patterns:
+          - '*'
+      client-dev:
+        dependency-type: 'development'
+        applies-to: 'version-updates'
+        patterns:
+          - '*'
+
+  - package-ecosystem: 'npm'
+    directory: '/nodejs-instrumentation'
+    schedule:
+      interval: 'weekly'
+    cooldown:
+      default-days: 7
+    labels:
+      - 'dependencies'
+      - 'dependabot'
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
+    groups:
+      nodejs-instrumentation-prod-security:
+        dependency-type: 'production'
+        applies-to: 'security-updates'
+        patterns:
+          - '*'
+      nodejs-instrumentation-prod:
+        dependency-type: 'production'
+        applies-to: 'version-updates'
+        patterns:
+          - '*'
+      nodejs-instrumentation-dev:
+        dependency-type: 'development'
+        applies-to: 'version-updates'
+        patterns:
+          - '*'

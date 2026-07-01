@@ -26,8 +26,53 @@ export function makePostgresDatabaseConfig(opts: {
   defaultScriptFormat: PostgresSupportedScriptFormats;
   scriptsDirectory: string;
   driverOpts: Options & { schema: string };
+  maintenanceDatabase?: string;
 }): DatabaseConfig<PostgresSupportedScriptFormats, PostgresContext> {
-  const { driverOpts, scriptsDirectory, defaultScriptFormat } = opts;
+  const { scriptsDirectory, defaultScriptFormat } = opts;
+  // Forward server-side `RAISE NOTICE` / `RAISE WARNING` from migrations
+  // (e.g. PL/pgSQL DO blocks that report rows they modified) to stderr.
+  // Sequelize sets `client_min_messages` to WARNING by default, which makes
+  // postgres filter NOTICE-severity messages server-side before they reach
+  // the client; we lower it to NOTICE on each connection so RAISE NOTICE
+  // actually surfaces, then attach a listener that prints each one.
+  type PgClientLike = {
+    on: (event: string, cb: (msg: unknown) => void) => void;
+    query: (sql: string, cb: (err: unknown) => void) => void;
+  };
+  const isPgClientLike = (c: unknown): c is PgClientLike =>
+    c !== null &&
+    typeof c === 'object' &&
+    'on' in c &&
+    typeof (c as { on: unknown }).on === 'function' &&
+    'query' in c &&
+    typeof (c as { query: unknown }).query === 'function';
+  const driverOpts: Options & { schema: string } = {
+    ...opts.driverOpts,
+    hooks: {
+      ...opts.driverOpts.hooks,
+      afterConnect(connection: unknown) {
+        if (!isPgClientLike(connection)) return;
+        connection.on('notice', (msg) => {
+          const m = msg as { message?: string; severity?: string };
+          const severity = m.severity ?? 'NOTICE';
+          // eslint-disable-next-line no-console
+          console.warn(`[postgres ${severity}] ${m.message ?? ''}`);
+        });
+        connection.query(`SET client_min_messages = 'notice'`, (err) => {
+          if (err) {
+            // eslint-disable-next-line no-console
+            console.warn(
+              `[postgres] failed to lower client_min_messages: ${String(err)}`,
+            );
+          }
+        });
+      },
+    },
+  };
+  // DB used for CREATE/DROP DATABASE (can't be the target DB itself).
+  // Defaults to `postgres`; some managed providers use a different name
+  // (e.g. `defaultdb`).
+  const maintenanceDatabase = opts.maintenanceDatabase ?? 'postgres';
 
   return {
     supportedEnvironments: ['staging', 'prod'],
@@ -119,32 +164,32 @@ export function makePostgresDatabaseConfig(opts: {
     },
 
     async dropDbAndDisconnect() {
-      // Verify that the user provided valid credentials for the db we're
-      // trying to drop, and that it exists, by trying to connect to it;
-      // throw if we can't.
       const targetDbconn = new Sequelize(driverOpts);
       await targetDbconn.authenticate();
       await targetDbconn.close();
 
-      // Now, connect to the default `postgres` db, rather than the db that we
-      // want to drop, because, in postgres, the database currently connected
-      // to cannot be dropped.
-      const postgresDbConn = new Sequelize({
+      const sequelize = new Sequelize({
         ...driverOpts,
-        database: 'postgres',
+        database: maintenanceDatabase,
       });
-      const dbName = driverOpts.database;
-
-      await postgresDbConn.query(`DROP DATABASE "${dbName}" WITH (FORCE);`);
-      await postgresDbConn.close();
+      await sequelize.query(
+        `DROP DATABASE "${driverOpts.database}" WITH (FORCE);`,
+      );
+      await sequelize.close();
     },
 
     async prepareDbAndDisconnect() {
-      const sequelize = new Sequelize({ ...driverOpts, database: 'postgres' });
-      const databases = await sequelize.query(
-        `SELECT * FROM pg_database WHERE datname='${driverOpts.database}'`,
+      const sequelize = new Sequelize({
+        ...driverOpts,
+        database: maintenanceDatabase,
+      });
+      const existing = await sequelize.query(
+        `SELECT 1 FROM pg_database WHERE datname = ?`,
+        { replacements: [driverOpts.database], type: QueryTypes.SELECT },
       );
-      if ((databases[1] as any).rows.length === 0) {
+      if (existing.length === 0) {
+        // DDL identifiers can't be bound; driverOpts.database comes from
+        // trusted config (env vars), not user input.
         await sequelize.query(`CREATE DATABASE "${driverOpts.database}";`);
       }
       await sequelize.close();

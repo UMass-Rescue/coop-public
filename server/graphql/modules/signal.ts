@@ -1,5 +1,4 @@
-import { type SignalSubcategory } from '@roostorg/types';
-import { AuthenticationError } from 'apollo-server-express';
+import { type SignalSubcategory } from '@roostorg/coop-types';
 import { type ReadonlyDeep } from 'type-fest';
 
 import { getIntegrationRegistry } from '../../services/integrationRegistry/index.js';
@@ -16,6 +15,7 @@ import {
   type GQLSupportedLanguagesResolvers,
 } from '../generated.js';
 import { type ResolverMap } from '../resolvers.js';
+import { unauthenticatedError } from '../utils/errors.js';
 
 const typeDefs = /* GraphQL */ `
   enum SignalPricingStructureType {
@@ -54,11 +54,17 @@ const typeDefs = /* GraphQL */ `
     id: ID! # JsonOf<SignalId>
     type: String!
     integration: String
-    """Display name for the signal’s integration (from registry manifest). Null when signal has no integration."""
+    """
+    Display name for the signal’s integration (from registry manifest). Null when signal has no integration.
+    """
     integrationTitle: String
-    """Logo URL for the integration. Null if not set or when signal has no integration."""
+    """
+    Logo URL for the integration. Null if not set or when signal has no integration.
+    """
     integrationLogoUrl: String
-    """Logo-with-background URL for the integration. Null if not set or when signal has no integration."""
+    """
+    Logo-with-background URL for the integration. Null if not set or when signal has no integration.
+    """
     integrationLogoWithBackgroundUrl: String
     name: String!
     description: String!
@@ -92,14 +98,17 @@ const typeDefs = /* GraphQL */ `
     IMAGE_SIMILARITY_SCORE
     IMAGE_SIMILARITY_DOES_NOT_MATCH
     IMAGE_SIMILARITY_MATCH
-    BENIGN_MODEL
     GOOGLE_CONTENT_SAFETY_API_IMAGE
+    OPEN_AI_GRAPHIC_VIOLENCE_IMAGE_MODEL
     OPEN_AI_GRAPHIC_VIOLENCE_TEXT_MODEL
     OPEN_AI_HATE_TEXT_MODEL
     OPEN_AI_HATE_THREATENING_TEXT_MODEL
+    OPEN_AI_SELF_HARM_IMAGE_MODEL
     OPEN_AI_SELF_HARM_TEXT_MODEL
+    OPEN_AI_SEXUAL_IMAGE_MODEL
     OPEN_AI_SEXUAL_MINORS_TEXT_MODEL
     OPEN_AI_SEXUAL_TEXT_MODEL
+    OPEN_AI_VIOLENCE_IMAGE_MODEL
     OPEN_AI_VIOLENCE_TEXT_MODEL
     OPEN_AI_WHISPER_TRANSCRIPTION
     SENTINEL_RARE_CLASS_AFFINITY
@@ -203,23 +212,28 @@ const Signal: GQLSignalResolvers = {
   },
   integrationTitle(signal) {
     if (signal.integration == null) return null;
-    return getIntegrationRegistry().getManifest(signal.integration)?.title ?? null;
+    return (
+      getIntegrationRegistry().getManifest(signal.integration)?.title ?? null
+    );
   },
   integrationLogoUrl(signal) {
     if (signal.integration == null) return null;
-    return getIntegrationRegistry().getManifest(signal.integration)?.logoUrl ?? null;
+    return (
+      getIntegrationRegistry().getManifest(signal.integration)?.logoUrl ?? null
+    );
   },
   integrationLogoWithBackgroundUrl(signal) {
     if (signal.integration == null) return null;
-    return getIntegrationRegistry().getManifest(signal.integration)?.logoWithBackgroundUrl ?? null;
+    return (
+      getIntegrationRegistry().getManifest(signal.integration)
+        ?.logoWithBackgroundUrl ?? null
+    );
   },
   name(signal) {
     return signal.displayName;
   },
   pricingStructure(signal): GQLSignalPricingStructure {
-    const ps = signal.pricingStructure as
-      | { type: string }
-      | string;
+    const ps = signal.pricingStructure as { type: string } | string;
     if (typeof ps === 'object' && 'type' in ps) {
       return ps as GQLSignalPricingStructure;
     }
@@ -229,9 +243,7 @@ const Signal: GQLSignalResolvers = {
     const user = context.getUser();
 
     if (!user) {
-      throw new AuthenticationError(
-        'User required to load signal disabledInfo.',
-      );
+      throw unauthenticatedError('User required to load signal disabledInfo.');
     }
 
     // Non-null assertion below is safe because, if this resolver ran, it means
@@ -260,7 +272,8 @@ const Signal: GQLSignalResolvers = {
           'ZENTROPI',
         );
         if (config?.name === 'ZENTROPI') {
-          const versions = (config.apiCredential.labelerVersions ?? []) as Array<{
+          const versions = (config.apiCredential.labelerVersions ??
+            []) as Array<{
             id: string;
             label: string;
           }>;

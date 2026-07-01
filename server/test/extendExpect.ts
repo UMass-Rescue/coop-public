@@ -1,7 +1,6 @@
 // eslint-disable-next-line import/no-extraneous-dependencies
-import jestSnapshot from 'jest-snapshot';
-// eslint-disable-next-line import/no-extraneous-dependencies
-import jsonPath from 'jsonpath';
+import jestSnapshot, { type Context as SnapshotContext } from 'jest-snapshot';
+import { JSONPath } from 'jsonpath-plus';
 import lodash from 'lodash';
 
 const { toMatchSnapshot } = jestSnapshot;
@@ -42,7 +41,11 @@ declare global {
 }
 
 expect.extend({
-  toMatchDynamicSnapshot(received, propertyMatchers: object, hint?: string) {
+  toMatchDynamicSnapshot(
+    received,
+    propertyMatchers: object,
+    hint?: string,
+  ): jest.CustomMatcherResult | Promise<jest.CustomMatcherResult> {
     // Treat property matcher keys as jsonpath queries
     // if they start with a $ and contain a dot.
     const isJsonPath = (it: string) => it[0] === '$' && it.includes('.');
@@ -53,16 +56,19 @@ expect.extend({
         keyof typeof propertyMatchers;
 
       if (isJsonPath(k)) {
-        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete, functional/immutable-data -- derived snapshot matchers
         delete generatedPropertyMatchers[key];
-        jsonPath.paths(received, k).forEach((path) => {
-          set(generatedPropertyMatchers, path.slice(1), propertyMatchers[key]);
-        });
+        JSONPath({ path: k, json: received, resultType: 'path' }).forEach(
+          (pathStr: string) => {
+            const path = JSONPath.toPathArray(pathStr).slice(1);
+            set(generatedPropertyMatchers, path, propertyMatchers[key]);
+          },
+        );
       }
     });
 
-    return (toMatchSnapshot as any).call(
-      this,
+    return toMatchSnapshot.call(
+      this as SnapshotContext,
       received,
       generatedPropertyMatchers,
       hint,

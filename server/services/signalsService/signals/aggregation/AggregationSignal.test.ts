@@ -2,11 +2,11 @@ import { uid } from 'uid';
 import { v1 as uuidv1 } from 'uuid';
 
 import { TestDateProvider } from '../../../../test/dateProvider.js';
+import createActions from '../../../../test/fixtureHelpers/createActions.js';
 import createContentItemTypes from '../../../../test/fixtureHelpers/createContentItemTypes.js';
 import createOrg from '../../../../test/fixtureHelpers/createOrg.js';
 import createUser from '../../../../test/fixtureHelpers/createUser.js';
-import { makeMockedServer } from '../../../../test/setupMockedServer.js';
-import { makeTestWithFixture } from '../../../../test/utils.js';
+import { makeTransactionalTestWithFixture } from '../../../../test/harness/transactionalTest.js';
 import { toCorrelationId } from '../../../../utils/correlationIds.js';
 import SafeTracer from '../../../../utils/SafeTracer.js';
 import {
@@ -16,47 +16,49 @@ import {
 } from '../../../itemProcessingService/index.js';
 
 describe('AggregationSignal', () => {
-  const testWithFixture = makeTestWithFixture(async () => {
-    const { server, deps, shutdown } = await makeMockedServer();
-
+  const testWithFixture = makeTransactionalTestWithFixture(async ({ deps }) => {
     const {
-      Sequelize: models,
       ModerationConfigService,
       AggregationsService,
       RuleAPIDataSource,
+      ActionAPIDataSource,
       ApiKeyService,
+      KyselyPg,
     } = deps;
 
-    const { org, cleanup: orgCleanup } = await createOrg(
-      models,
-      ModerationConfigService,
-      ApiKeyService,
+    const { org } = await createOrg(
+      { KyselyPg, ModerationConfigService, ApiKeyService },
       uid(),
     );
 
-    const { user, cleanup: userCleanup } = await createUser(models, org.id, {});
+    const { user } = await createUser(KyselyPg, org.id);
 
-    const { itemTypes, cleanup: itemTypesCleanup } =
-      await createContentItemTypes({
-        moderationConfigService: ModerationConfigService,
-        orgId: org.id,
-        includeCreator: true,
-        extra: {},
-      });
+    const { itemTypes } = await createContentItemTypes({
+      moderationConfigService: ModerationConfigService,
+      orgId: org.id,
+      includeCreator: true,
+      extra: {},
+    });
+
+    const { actions } = await createActions({
+      actionAPI: ActionAPIDataSource,
+      itemTypeIds: [itemTypes[0].id],
+      orgId: org.id,
+    });
 
     // Spy on aggregation service functions.
     const aggregationsServiceSpy = AggregationsService;
-    // eslint-disable-next-line better-mutation/no-mutation
+    // eslint-disable-next-line functional/immutable-data
     aggregationsServiceSpy.updateAggregation = jest.fn(
       aggregationsServiceSpy.updateAggregation.bind(aggregationsServiceSpy),
     );
-    // eslint-disable-next-line better-mutation/no-mutation
+    // eslint-disable-next-line functional/immutable-data
     aggregationsServiceSpy.evaluateAggregation = jest.fn(
       aggregationsServiceSpy.evaluateAggregation.bind(aggregationsServiceSpy),
     );
 
     const dateProvider = new TestDateProvider();
-    // eslint-disable-next-line better-mutation/no-mutation
+    // eslint-disable-next-line functional/immutable-data
     deps['ActionPublisher'].publishAction = jest.fn().mockReturnValue(true);
 
     const rule = await RuleAPIDataSource.createContentRule(
@@ -117,7 +119,7 @@ describe('AggregationSignal', () => {
             },
           ],
         },
-        actionIds: ['73b2f15cc91'],
+        actionIds: [actions[0].id],
         policyIds: [],
         tags: [],
         maxDailyActions: null,
@@ -127,19 +129,10 @@ describe('AggregationSignal', () => {
     );
 
     return {
-      server,
-      deps,
       rule,
       itemType: itemTypes[0],
       org,
       dateProvider,
-      async cleanup() {
-        await rule.destroy();
-        await itemTypesCleanup();
-        await userCleanup();
-        await orgCleanup();
-        await shutdown();
-      },
     };
   });
 
@@ -148,7 +141,7 @@ describe('AggregationSignal', () => {
     async ({ itemType, org, dateProvider, deps }) => {
       // Clear Redis to ensure clean state for aggregation counters
       await deps.IORedis.flushdb();
-      
+
       const creatorId = 'some-creator-id';
       const creatorTypeId = 'some-creator-type-id';
 
@@ -236,7 +229,7 @@ describe('AggregationSignal', () => {
           creatorTypeId,
         },
       );
-      
+
       const ruleResultsAfter2 = await deps.RuleEngine.runEnabledRules(
         itemSubmission2,
         toCorrelationId({
@@ -262,7 +255,7 @@ describe('AggregationSignal', () => {
           creatorTypeId,
         },
       );
-      
+
       const ruleResultsAnotherUser = await deps.RuleEngine.runEnabledRules(
         itemSubmissionAnotherUser,
         toCorrelationId({
@@ -292,7 +285,7 @@ describe('AggregationSignal', () => {
           creatorTypeId,
         },
       );
-      
+
       const ruleResultsFailCondition = await deps.RuleEngine.runEnabledRules(
         itemSubmissionFailCondition,
         toCorrelationId({
@@ -319,7 +312,7 @@ describe('AggregationSignal', () => {
           creatorTypeId,
         },
       );
-      
+
       const ruleResultsAfter3 = await deps.RuleEngine.runEnabledRules(
         itemSubmission3,
         toCorrelationId({
@@ -345,7 +338,7 @@ describe('AggregationSignal', () => {
           creatorTypeId,
         },
       );
-      
+
       const actionsTriggeredAfter4 = await (
         await deps.RuleEngine.runEnabledRules(
           itemSubmission4,
