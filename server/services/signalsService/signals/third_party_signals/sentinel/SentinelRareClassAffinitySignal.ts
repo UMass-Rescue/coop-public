@@ -149,14 +149,28 @@ It compares submitted content against labeled positive (rare/harmful) and negati
             limit: DEFAULT_THREAD_CONTEXT_LIMIT,
           });
 
+        // `submitContent.ts` writes the current submission to the thread's
+        // history *before* rules run (so thread-aware signals have context
+        // available), and `getThreadSubmissionsByTime` is bounded by time,
+        // not by item identity. That means the submission which triggered
+        // this very signal run is indistinguishable from real "prior"
+        // messages and comes back in `threadItems` too. Drop (at most) one
+        // occurrence matching `primaryText` so it isn't double-counted,
+        // which would otherwise skew the aggregate score Sentinel computes.
+        let skippedSelf = false;
         for await (const { latestSubmission } of threadItems) {
           const itemText = extractTextFromSubmission(
             latestSubmission,
             runtimeArgs.contentTextFieldName,
           );
-          if (itemText) {
-            texts.push(itemText);
+          if (itemText == null) {
+            continue;
           }
+          if (!skippedSelf && itemText === primaryText) {
+            skippedSelf = true;
+            continue;
+          }
+          texts.push(itemText);
         }
       } catch {
         // Thread context is best-effort. If it fails, we continue with just

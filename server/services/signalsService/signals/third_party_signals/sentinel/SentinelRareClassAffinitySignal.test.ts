@@ -236,6 +236,92 @@ describe('SentinelRareClassAffinitySignal', () => {
       expect(texts).toContain('prior thread message');
     });
 
+    it('does not double-count the triggering submission when it is echoed back as thread context', async () => {
+      // submitContent.ts writes the current submission to Scylla before
+      // running rules, so getThreadSubmissionsByTime (which is time-bounded,
+      // not identity-bounded) can return the very submission that triggered
+      // this signal run alongside genuine prior messages.
+      const scoreTexts = jest.fn().mockResolvedValue({
+        rare_class_affinity_score: 0.5,
+        observation_scores: {},
+        num_observations: 2,
+      });
+
+      const priorItem = {
+        latestSubmission: {
+          data: { text: 'prior thread message' },
+          itemType: { kind: 'CONTENT', schema: [], schemaFieldRoles: {} },
+        },
+        priorSubmissions: undefined,
+        parents: (async function* () {})(),
+      };
+      const selfItem = {
+        latestSubmission: {
+          data: { text: 'test content' },
+          itemType: { kind: 'CONTENT', schema: [], schemaFieldRoles: {} },
+        },
+        priorSubmissions: undefined,
+        parents: (async function* () {})(),
+      };
+      const getThreadSubmissionsByTime = jest.fn().mockReturnValue(
+        (async function* () {
+          yield selfItem;
+          yield priorItem;
+        })(),
+      );
+
+      const signal = makeSignal({ scoreTexts }, { getThreadSubmissionsByTime });
+
+      await signal.run(
+        makeInput({
+          runtimeArgs: {
+            threadIdentifier: { id: 'thread-1', typeId: 'content-type-1' },
+            contentTextFieldName: 'text',
+          },
+        }),
+      );
+
+      const texts = scoreTexts.mock.calls[0][0].texts;
+      expect(texts).toEqual(['test content', 'prior thread message']);
+    });
+
+    it('only drops one occurrence of duplicate text, in case a genuine duplicate message exists', async () => {
+      const scoreTexts = jest.fn().mockResolvedValue({
+        rare_class_affinity_score: 0.5,
+        observation_scores: {},
+        num_observations: 3,
+      });
+
+      const makeItem = (text: string) => ({
+        latestSubmission: {
+          data: { text },
+          itemType: { kind: 'CONTENT', schema: [], schemaFieldRoles: {} },
+        },
+        priorSubmissions: undefined,
+        parents: (async function* () {})(),
+      });
+      const getThreadSubmissionsByTime = jest.fn().mockReturnValue(
+        (async function* () {
+          yield makeItem('test content');
+          yield makeItem('test content');
+        })(),
+      );
+
+      const signal = makeSignal({ scoreTexts }, { getThreadSubmissionsByTime });
+
+      await signal.run(
+        makeInput({
+          runtimeArgs: {
+            threadIdentifier: { id: 'thread-1', typeId: 'content-type-1' },
+            contentTextFieldName: 'text',
+          },
+        }),
+      );
+
+      const texts = scoreTexts.mock.calls[0][0].texts;
+      expect(texts).toEqual(['test content', 'test content']);
+    });
+
     it('still returns a score when thread fetch fails', async () => {
       const scoreTexts = jest.fn().mockResolvedValue({
         rare_class_affinity_score: 0.5,
