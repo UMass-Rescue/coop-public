@@ -799,7 +799,7 @@ const Mutation: GQLMutationResolvers = {
     }
 
     return gqlSuccessResult(
-      contentItemType,
+      { data: contentItemType },
       'MutateContentTypeSuccessResponse',
     );
   },
@@ -845,7 +845,7 @@ const Mutation: GQLMutationResolvers = {
     }
 
     return gqlSuccessResult(
-      contentItemType,
+      { data: contentItemType },
       'MutateContentTypeSuccessResponse',
     );
   },
@@ -883,7 +883,10 @@ const Mutation: GQLMutationResolvers = {
       );
     }
 
-    return gqlSuccessResult(threadItemType, 'MutateThreadTypeSuccessResponse');
+    return gqlSuccessResult(
+      { data: threadItemType },
+      'MutateThreadTypeSuccessResponse',
+    );
   },
   async updateThreadItemType(_, params, context) {
     const user = context.getUser();
@@ -927,7 +930,10 @@ const Mutation: GQLMutationResolvers = {
       );
     }
 
-    return gqlSuccessResult(threadItemType, 'MutateThreadTypeSuccessResponse');
+    return gqlSuccessResult(
+      { data: threadItemType },
+      'MutateThreadTypeSuccessResponse',
+    );
   },
   async createUserItemType(__, params, context) {
     const user = context.getUser();
@@ -966,7 +972,10 @@ const Mutation: GQLMutationResolvers = {
       );
     }
 
-    return gqlSuccessResult(userItemType, 'MutateUserTypeSuccessResponse');
+    return gqlSuccessResult(
+      { data: userItemType },
+      'MutateUserTypeSuccessResponse',
+    );
   },
   async updateUserItemType(_, params, context) {
     const user = context.getUser();
@@ -1008,7 +1017,10 @@ const Mutation: GQLMutationResolvers = {
       );
     }
 
-    return gqlSuccessResult(contentItemType, 'MutateUserTypeSuccessResponse');
+    return gqlSuccessResult(
+      { data: contentItemType },
+      'MutateUserTypeSuccessResponse',
+    );
   },
   async deleteItemType(_, params, context) {
     const user = context.getUser();

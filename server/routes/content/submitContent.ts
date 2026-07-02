@@ -32,7 +32,7 @@ import {
   sanitizeError,
   type SerializableError,
 } from '../../utils/errors.js';
-import { safeGet, safePick, sleep } from '../../utils/misc.js';
+import { safeGet, safePick, sleep, withRetries } from '../../utils/misc.js';
 import { type RequestHandlerWithBodies } from '../../utils/route-helpers.js';
 import { instantiateOpaqueType } from '../../utils/typescript-types.js';
 import {
@@ -46,6 +46,7 @@ export default function submitContent({
   Tracer,
   ModerationConfigService,
   Meter,
+  ItemInvestigationService,
 }: // @ts-ignore
 Dependencies): RequestHandlerWithBodies<
   EvaluateContentInputCamelCase,
@@ -193,6 +194,37 @@ Dependencies): RequestHandlerWithBodies<
       res.status(202).end();
     }
 
+    // Write to Scylla before running rules so that thread-aware signals
+    // (e.g. Sentinel) can read prior messages in the thread when scoring.
+    // This is best-effort: failures are swallowed so they never block rule execution.
+    const insertWithRetries = Tracer.traced(
+      {
+        resource: 'SubmitContent',
+        operation: 'ItemInvestigationService.insertItem',
+      },
+      withRetries(
+        {
+          maxRetries: 1,
+          initialTimeMsBetweenRetries: 50,
+          maxTimeMsBetweenRetries: 200,
+        },
+        ItemInvestigationService.insertItem.bind(ItemInvestigationService),
+      ),
+    );
+    try {
+      await insertWithRetries({
+        requestId,
+        orgId,
+        itemSubmission: {
+          ...itemSubmissionOrError.itemSubmission,
+          submissionTime:
+            itemSubmissionOrError.itemSubmission.submissionTime ?? new Date(),
+        },
+      });
+    } catch {
+      // Swallow insert errors; rules can still run without thread context.
+    }
+
     // Run rules
     try {
       const results = await RuleEngine.runEnabledRules(
@@ -328,11 +360,32 @@ function rawContentSubmissionToItemSubmission(
   | { itemSubmission: ItemSubmission; error?: undefined } {
   const submissionTime = new Date();
 
+  // Coerce a string threadId to { id, typeId } when the content type has a
+  // threadId schema field role. This allows callers to pass a plain string ID
+  // for the parent thread without knowing the internal identifier format.
+  const raw = rawContentSubmission.content;
+  const threadIdField =
+    'threadId' in itemType.schemaFieldRoles
+      ? (itemType.schemaFieldRoles as { threadId?: string }).threadId
+      : undefined;
+  const content: RawItemData =
+    threadIdField &&
+    typeof raw[threadIdField] === 'string' &&
+    (raw[threadIdField] as string).length > 0
+      ? {
+          ...raw,
+          [threadIdField]: {
+            id: raw[threadIdField] as string,
+            typeId: itemType.id,
+          },
+        }
+      : raw;
+
   // Validate content JSON
   const normalizedDataOrValidationErrors = toNormalizedItemDataOrErrors(
     legalItemTypeIds,
     itemType,
-    rawContentSubmission.content,
+    content,
   );
 
   return Array.isArray(normalizedDataOrValidationErrors)

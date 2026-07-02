@@ -265,5 +265,6 @@ namespace NodeJS {
     OPEN_AI_API_KEY?: string;
     SLACK_APP_BEARER_TOKEN?: string;
     GRAPHQL_OPAQUE_SCALAR_SECRET?: string;
+    SENTINEL_API_URL?: string;
   }
 }
