@@ -42,7 +42,7 @@ export const INTEGRATION_CONFIGS: IntegrationConfig[] = [
     title: 'Sentinel',
     logo: RobloxLogo,
     logoWithBackground: RobloxLogo,
-    url: 'https://github.com/UMass-Rescue/Sentinel',
+    url: 'https://github.com/Roblox/sentinel',
     requiresInfo: false,
   },
   {
