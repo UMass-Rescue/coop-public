@@ -1,0 +1,1064 @@
+diff -ruN orig/api/__init__.py new/api/__init__.py
+--- orig/api/__init__.py	1969-12-31 19:00:00
++++ new/api/__init__.py	2026-08-12 15:31:35
+@@ -0,0 +1,19 @@
++# Copyright 2025 Roblox Corporation
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     https://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++"""FastAPI application for Sentinel semantic scoring."""
++
++from sentinel.api.main import app
++
++__all__ = ["app"]
+diff -ruN orig/api/config.py new/api/config.py
+--- orig/api/config.py	1969-12-31 19:00:00
++++ new/api/config.py	2026-08-12 15:31:35
+@@ -0,0 +1,38 @@
++# Copyright 2025 Roblox Corporation
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     https://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++"""Configuration for the Sentinel FastAPI application."""
++
++from typing import Optional
++from pydantic_settings import BaseSettings
++
++
++class Settings(BaseSettings):
++    """Application settings loaded from environment variables."""
++
++    # Bank auto-loading (e.g., /data/banks/my_model)
++    auto_load_banks_path: Optional[str] = None
++
++    # Scoring defaults
++    default_top_k: int = 5
++    default_min_score: float = 0.1
++    default_min_size_of_scores: int = 5
++
++    class Config:
++        env_prefix = "SENTINEL_"
++        case_sensitive = False
++
++
++# Global settings instance
++settings = Settings()
+diff -ruN orig/api/dependencies.py new/api/dependencies.py
+--- orig/api/dependencies.py	1969-12-31 19:00:00
++++ new/api/dependencies.py	2026-08-12 15:31:35
+@@ -0,0 +1,296 @@
++# Copyright 2025 Roblox Corporation
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     https://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++"""Shared dependencies for the Sentinel FastAPI application."""
++
++import logging
++import os
++from pathlib import Path
++from threading import Lock
++from typing import Optional, List, Dict, Any
++
++import torch
++
++from sentinel.sentinel_local_index import SentinelLocalIndex
++from sentinel.embeddings.sbert import get_sentence_transformer_and_scaling_fn
++
++LOG = logging.getLogger(__name__)
++
++
++class IndexManager:
++    """
++    Singleton manager for the SentinelLocalIndex.
++
++    Provides thread-safe loading, unloading, and access to the index.
++    """
++
++    _instance: Optional["IndexManager"] = None
++    _lock: Lock = Lock()
++
++    def __new__(cls) -> "IndexManager":
++        if cls._instance is None:
++            with cls._lock:
++                if cls._instance is None:
++                    cls._instance = super().__new__(cls)
++                    cls._instance._initialized = False
++        return cls._instance
++
++    def __init__(self):
++        if self._initialized:
++            return
++        self._index: Optional[SentinelLocalIndex] = None
++        self._model_name: Optional[str] = None
++        self._index_lock: Lock = Lock()
++        self._initialized = True
++
++    @property
++    def is_loaded(self) -> bool:
++        """Check if an index is currently loaded."""
++        return self._index is not None
++
++    @property
++    def index(self) -> Optional[SentinelLocalIndex]:
++        """Get the current index (may be None if not loaded)."""
++        return self._index
++
++    @property
++    def model_name(self) -> Optional[str]:
++        """Get the model name of the loaded index."""
++        return self._model_name
++
++    def get_status(self) -> Dict[str, Any]:
++        """Get the current status of the index manager."""
++        with self._index_lock:
++            if self._index is None:
++                return {
++                    "loaded": False,
++                    "model_name": None,
++                    "positive_count": None,
++                    "negative_count": None,
++                    "model_card": None,
++                }
++            return {
++                "loaded": True,
++                "model_name": self._model_name,
++                "positive_count": (
++                    self._index.positive_embeddings.shape[0]
++                    if self._index.positive_embeddings is not None
++                    else 0
++                ),
++                "negative_count": (
++                    self._index.negative_embeddings.shape[0]
++                    if self._index.negative_embeddings is not None
++                    else 0
++                ),
++                "model_card": self._index.model_card,
++            }
++
++    def load_from_path(
++        self,
++        path: str,
++        negative_to_positive_ratio: float = 1.0,
++        aws_access_key_id: Optional[str] = None,
++        aws_secret_access_key: Optional[str] = None,
++    ) -> None:
++        """
++        Load an index from a path.
++
++        Args:
++            path: Path to the directory containing the index files.
++            negative_to_positive_ratio: Ratio of negative examples to keep.
++            aws_access_key_id: Optional AWS access key for S3 paths.
++            aws_secret_access_key: Optional AWS secret key for S3 paths.
++        """
++        with self._index_lock:
++            LOG.info(f"Loading index from {path}")
++
++            self._index = SentinelLocalIndex.load(
++                path=path,
++                aws_access_key_id=aws_access_key_id,
++                aws_secret_access_key=aws_secret_access_key,
++                negative_to_positive_ratio=negative_to_positive_ratio,
++            )
++
++            # Try to extract model name from the loaded config
++            # The model name is stored when loading
++            from sentinel.io.index_io import load_index, create_s3_transport_params
++
++            transport_params = create_s3_transport_params(
++                aws_access_key_id, aws_secret_access_key
++            )
++            config, _, _ = load_index(path=path, transport_params=transport_params)
++            self._model_name = config.encoder_model_name_or_path
++
++            LOG.info(
++                f"Index loaded successfully. "
++                f"Positive: {self._index.positive_embeddings.shape[0]}, "
++                f"Negative: {self._index.negative_embeddings.shape[0]}"
++            )
++
++    def create_from_folders(
++        self,
++        positive_folder: str,
++        negative_folder: str,
++        output_path: str,
++        model_name: str = "all-MiniLM-L6-v2",
++        file_extensions: List[str] = [".txt", ".md"],
++        model_card: Optional[Dict[str, Any]] = None,
++    ) -> Dict[str, int]:
++        """
++        Create new banks from folders of text files.
++
++        Args:
++            positive_folder: Path to folder with positive (rare class) text files.
++            negative_folder: Path to folder with negative (common class) text files.
++            output_path: Path where the new index will be saved.
++            model_name: Name of the sentence transformer model to use.
++            file_extensions: File extensions to include.
++            model_card: Optional metadata about the model.
++
++        Returns:
++            Dictionary with counts of positive and negative examples.
++        """
++        with self._index_lock:
++            LOG.info(f"Creating new banks from {positive_folder} and {negative_folder}")
++
++            # Read text files from both folders
++            positive_texts = self._read_texts_from_folder(
++                positive_folder, file_extensions
++            )
++            negative_texts = self._read_texts_from_folder(
++                negative_folder, file_extensions
++            )
++
++            if not positive_texts:
++                raise ValueError(f"No text files found in {positive_folder}")
++            if not negative_texts:
++                raise ValueError(f"No text files found in {negative_folder}")
++
++            LOG.info(
++                f"Found {len(positive_texts)} positive and "
++                f"{len(negative_texts)} negative texts"
++            )
++
++            # Get the sentence transformer model
++            sentence_model, scale_fn = get_sentence_transformer_and_scaling_fn(
++                model_name
++            )
++
++            # Generate embeddings
++            LOG.info("Generating positive embeddings...")
++            positive_embeddings = sentence_model.encode(
++                positive_texts,
++                normalize_embeddings=True,
++                show_progress_bar=True,
++            )
++
++            LOG.info("Generating negative embeddings...")
++            negative_embeddings = sentence_model.encode(
++                negative_texts,
++                normalize_embeddings=True,
++                show_progress_bar=True,
++            )
++
++            # Convert to tensors
++            positive_embeddings = torch.tensor(positive_embeddings)
++            negative_embeddings = torch.tensor(negative_embeddings)
++
++            # Create the index
++            self._index = SentinelLocalIndex(
++                sentence_model=sentence_model,
++                positive_embeddings=positive_embeddings,
++                negative_embeddings=negative_embeddings,
++                scale_fn=scale_fn,
++                positive_corpus=positive_texts,
++                negative_corpus=negative_texts,
++                model_card=model_card or {},
++            )
++            self._model_name = model_name
++
++            # Save the index
++            os.makedirs(output_path, exist_ok=True)
++            self._index.save(
++                path=output_path,
++                encoder_model_name_or_path=model_name,
++            )
++
++            LOG.info(f"Banks created and saved to {output_path}")
++
++            return {
++                "positive_count": len(positive_texts),
++                "negative_count": len(negative_texts),
++            }
++
++    def _read_texts_from_folder(
++        self, folder_path: str, extensions: List[str]
++    ) -> List[str]:
++        """
++        Read all text files from a folder.
++
++        Args:
++            folder_path: Path to the folder.
++            extensions: List of file extensions to include.
++
++        Returns:
++            List of text contents from all matching files.
++        """
++        texts = []
++        folder = Path(folder_path)
++
++        if not folder.exists():
++            raise ValueError(f"Folder does not exist: {folder_path}")
++
++        for ext in extensions:
++            for file_path in folder.glob(f"**/*{ext}"):
++                try:
++                    content = file_path.read_text(encoding="utf-8").strip()
++                    if content:
++                        texts.append(content)
++                except Exception as e:
++                    LOG.warning(f"Failed to read {file_path}: {e}")
++
++        return texts
++
++    def unload(self) -> None:
++        """Unload the current index."""
++        with self._index_lock:
++            self._index = None
++            self._model_name = None
++            LOG.info("Index unloaded")
++
++
++# Global index manager instance
++index_manager = IndexManager()
++
++
++def get_index_manager() -> IndexManager:
++    """Dependency to get the index manager."""
++    return index_manager
++
++
++def get_loaded_index() -> SentinelLocalIndex:
++    """
++    Dependency to get the loaded index.
++
++    Raises HTTPException if no index is loaded.
++    """
++    from fastapi import HTTPException
++
++    manager = get_index_manager()
++    if not manager.is_loaded:
++        raise HTTPException(
++            status_code=503,
++            detail="No banks loaded. Please load banks first using POST /banks/load",
++        )
++    return manager.index
+diff -ruN orig/api/main.py new/api/main.py
+--- orig/api/main.py	1969-12-31 19:00:00
++++ new/api/main.py	2026-08-12 15:31:35
+@@ -0,0 +1,130 @@
++# Copyright 2025 Roblox Corporation
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     https://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++"""FastAPI application entry point for Sentinel."""
++
++import logging
++from contextlib import asynccontextmanager
++
++from fastapi import FastAPI
++from fastapi.middleware.cors import CORSMiddleware
++
++from sentinel.api.config import settings
++from sentinel.api.schemas import HealthResponse
++from sentinel.api.routes.scoring import router as scoring_router
++from sentinel.api.routes.banks import router as banks_router
++from sentinel.api.dependencies import index_manager
++
++# Configure logging
++logging.basicConfig(
++    level=logging.INFO,
++    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
++)
++LOG = logging.getLogger(__name__)
++
++
++@asynccontextmanager
++async def lifespan(app: FastAPI):
++    """Application lifespan handler for startup/shutdown events."""
++    # Startup
++    LOG.info("Starting Sentinel API")
++
++    # Auto-load banks if configured
++    if settings.auto_load_banks_path:
++        LOG.info(f"Auto-loading banks from {settings.auto_load_banks_path}")
++        try:
++            index_manager.load_from_path(settings.auto_load_banks_path)
++            LOG.info("Banks auto-loaded successfully")
++        except Exception as e:
++            LOG.error(f"Failed to auto-load banks: {e}")
++            # Continue startup even if auto-load fails
++
++    yield
++
++    # Shutdown
++    LOG.info("Shutting down...")
++    if index_manager.is_loaded:
++        index_manager.unload()
++
++
++# Create FastAPI application
++app = FastAPI(
++    title="Sentinel API",
++    description="""
++## Sentinel API
++
++Sentinel is a semantic scoring system for detecting rare text patterns using contrastive learning.
++
++### Core Concepts
++
++- **Positive Bank**: Contains examples of the rare class you want to detect (e.g., harmful content)
++- **Negative Bank**: Contains examples of common/normal content
++- **Contrastive Score**: Measures how similar text is to the positive bank vs. the negative bank
++- **Skewness Aggregation**: Detects if a conversation has outlier high-scoring messages
++
++### Quick Start
++
++1. **Load banks**: `POST /banks/load` with path to pre-computed embeddings
++2. **Score text**: `POST /score` with list of text samples
++3. **Check status**: `GET /banks/status` to see loaded bank information
++
++### Creating New Banks
++
++If you don't have pre-computed embeddings, use `POST /banks/create` to generate them
++from folders of text files.
++""",
++    version="1.0.0",
++    lifespan=lifespan,
++    docs_url="/docs",
++    redoc_url="/redoc",
++)
++
++# Add CORS middleware
++app.add_middleware(
++    CORSMiddleware,
++    allow_origins=["*"],  # Configure appropriately for production
++    allow_credentials=True,
++    allow_methods=["*"],
++    allow_headers=["*"],
++)
++
++# Include routers
++app.include_router(scoring_router)
++app.include_router(banks_router)
++
++
++@app.get(
++    "/health",
++    response_model=HealthResponse,
++    tags=["Health"],
++    summary="Health check",
++    description="Check if the API is running and whether banks are loaded.",
++)
++async def health_check() -> HealthResponse:
++    """Health check endpoint."""
++    return HealthResponse(
++        status="healthy",
++        banks_loaded=index_manager.is_loaded,
++        version="1.0.0",
++    )
++
++
++@app.get("/", include_in_schema=False)
++async def root():
++    """Root endpoint redirects to docs."""
++    return {
++        "message": "Sentinel API",
++        "docs": "/docs",
++        "health": "/health",
++    }
+diff -ruN orig/api/routes/__init__.py new/api/routes/__init__.py
+--- orig/api/routes/__init__.py	1969-12-31 19:00:00
++++ new/api/routes/__init__.py	2026-08-12 15:31:35
+@@ -0,0 +1,20 @@
++# Copyright 2025 Roblox Corporation
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     https://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++"""API routes for Sentinel."""
++
++from sentinel.api.routes.scoring import router as scoring_router
++from sentinel.api.routes.banks import router as banks_router
++
++__all__ = ["scoring_router", "banks_router"]
+diff -ruN orig/api/routes/banks.py new/api/routes/banks.py
+--- orig/api/routes/banks.py	1969-12-31 19:00:00
++++ new/api/routes/banks.py	2026-08-12 15:31:35
+@@ -0,0 +1,193 @@
++# Copyright 2025 Roblox Corporation
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     https://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++"""Bank management endpoints for Sentinel API."""
++
++import logging
++from fastapi import APIRouter, Depends, HTTPException
++
++from sentinel.api.schemas import (
++    LoadBanksRequest,
++    LoadBanksResponse,
++    CreateBanksRequest,
++    CreateBanksResponse,
++    BankStatusResponse,
++)
++from sentinel.api.dependencies import IndexManager, get_index_manager
++
++LOG = logging.getLogger(__name__)
++
++router = APIRouter(prefix="/banks", tags=["Bank Management"])
++
++
++@router.get(
++    "/status",
++    response_model=BankStatusResponse,
++    summary="Get bank status",
++    description="Get the current status of loaded banks, including counts and model information.",
++)
++async def get_bank_status(
++    manager: IndexManager = Depends(get_index_manager),
++) -> BankStatusResponse:
++    """Get the current status of the loaded banks."""
++    status = manager.get_status()
++    return BankStatusResponse(**status)
++
++
++@router.post(
++    "/load",
++    response_model=LoadBanksResponse,
++    summary="Load existing banks",
++    description="""
++Load existing banks from a path containing pre-computed embeddings.
++
++The path should contain:
++- `sentinel_local_index_config.json`: Configuration file with model name and settings
++- `embeddings.safetensors`: Pre-computed embeddings for positive and negative banks
++
++Supports both local filesystem paths and S3 URIs (s3://bucket/path).
++
++**Note:** Loading new banks will replace any previously loaded banks.
++""",
++)
++async def load_banks(
++    request: LoadBanksRequest,
++    manager: IndexManager = Depends(get_index_manager),
++) -> LoadBanksResponse:
++    """
++    Load existing banks from a path.
++
++    Args:
++        request: The load request containing the path.
++        manager: The index manager (injected via dependency).
++
++    Returns:
++        LoadBanksResponse with success status and bank information.
++    """
++    LOG.info(f"Loading banks from {request.path}")
++
++    try:
++        manager.load_from_path(
++            path=request.path,
++            negative_to_positive_ratio=request.negative_to_positive_ratio,
++        )
++
++        status = manager.get_status()
++        return LoadBanksResponse(
++            success=True,
++            message=f"Banks loaded successfully from {request.path}",
++            status=BankStatusResponse(**status),
++        )
++
++    except FileNotFoundError as e:
++        LOG.error(f"Failed to load banks: {e}")
++        raise HTTPException(
++            status_code=404,
++            detail=f"Banks not found at {request.path}: {str(e)}",
++        )
++    except Exception as e:
++        LOG.error(f"Failed to load banks: {e}", exc_info=True)
++        raise HTTPException(
++            status_code=500,
++            detail=f"Failed to load banks: {str(e)}",
++        )
++
++
++@router.post(
++    "/create",
++    response_model=CreateBanksResponse,
++    summary="Create new banks from text files",
++    description="""
++Create new banks by processing text files from specified folders.
++
++**Process:**
++1. Reads all text files (matching specified extensions) from the positive and negative folders
++2. Generates embeddings for each text using the specified sentence transformer model
++3. Saves the embeddings as a new bank at the output path
++4. Loads the newly created banks for immediate use
++
++**Folder structure:**
++- Each `.txt` or `.md` file in the positive folder becomes one positive example
++- Each `.txt` or `.md` file in the negative folder becomes one negative example
++- Files can be nested in subdirectories
++
++**Note:** This operation can take several minutes depending on the number of files 
++and the model used. The newly created banks are automatically loaded after creation.
++""",
++)
++async def create_banks(
++    request: CreateBanksRequest,
++    manager: IndexManager = Depends(get_index_manager),
++) -> CreateBanksResponse:
++    """
++    Create new banks from folders of text files.
++
++    Args:
++        request: The creation request with folder paths and settings.
++        manager: The index manager (injected via dependency).
++
++    Returns:
++        CreateBanksResponse with creation status and counts.
++    """
++    LOG.info(
++        f"Creating new banks from positive={request.positive_folder}, "
++        f"negative={request.negative_folder}"
++    )
++
++    try:
++        counts = manager.create_from_folders(
++            positive_folder=request.positive_folder,
++            negative_folder=request.negative_folder,
++            output_path=request.output_path,
++            model_name=request.model_name or "all-MiniLM-L6-v2",
++            file_extensions=request.file_extensions or [".txt", ".md"],
++            model_card=request.model_card,
++        )
++
++        return CreateBanksResponse(
++            success=True,
++            message=f"Banks created and loaded successfully",
++            output_path=request.output_path,
++            positive_count=counts["positive_count"],
++            negative_count=counts["negative_count"],
++        )
++
++    except ValueError as e:
++        LOG.error(f"Invalid input: {e}")
++        raise HTTPException(
++            status_code=400,
++            detail=str(e),
++        )
++    except Exception as e:
++        LOG.error(f"Failed to create banks: {e}", exc_info=True)
++        raise HTTPException(
++            status_code=500,
++            detail=f"Failed to create banks: {str(e)}",
++        )
++
++
++@router.post(
++    "/unload",
++    summary="Unload current banks",
++    description="Unload the currently loaded banks from memory.",
++)
++async def unload_banks(
++    manager: IndexManager = Depends(get_index_manager),
++) -> dict:
++    """Unload the currently loaded banks."""
++    if not manager.is_loaded:
++        return {"success": True, "message": "No banks were loaded"}
++
++    manager.unload()
++    return {"success": True, "message": "Banks unloaded successfully"}
+diff -ruN orig/api/routes/scoring.py new/api/routes/scoring.py
+--- orig/api/routes/scoring.py	1969-12-31 19:00:00
++++ new/api/routes/scoring.py	2026-08-12 15:31:35
+@@ -0,0 +1,96 @@
++# Copyright 2025 Roblox Corporation
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     https://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++"""Scoring endpoint for Sentinel API."""
++
++import logging
++from fastapi import APIRouter, Depends
++
++from sentinel.sentinel_local_index import SentinelLocalIndex
++from sentinel.api.schemas import ScoreRequest, ScoreResponse
++from sentinel.api.dependencies import get_loaded_index
++from sentinel.api.config import settings
++
++LOG = logging.getLogger(__name__)
++
++router = APIRouter(tags=["Scoring"])
++
++
++@router.post(
++    "/score",
++    response_model=ScoreResponse,
++    summary="Score a conversation",
++    description="""
++Score a list of text samples (e.g., messages in a conversation) against the loaded banks.
++
++**How scoring works:**
++
++1. Each text sample is encoded into an embedding vector
++2. For each sample, we find the top-k nearest neighbors in both positive (rare/harmful) 
++   and negative (common/normal) banks
++3. A contrastive score is computed: `log(mean(exp(pos_similarities)) / mean(exp(neg_similarities)))`
++4. Individual scores are aggregated using **skewness** to detect patterns across the conversation
++
++**Interpreting results:**
++
++- `rare_class_affinity_score`: Overall score for the conversation. Higher values indicate 
++  more affinity to the rare (harmful) class. Skewness captures if there are outlier 
++  high-scoring messages.
++- `observation_scores`: Per-message scores. High individual scores indicate messages 
++  similar to the positive (rare) bank.
++
++**Note:** Banks must be loaded before calling this endpoint. Use `POST /banks/load` first.
++""",
++)
++async def score_text(
++    request: ScoreRequest,
++    index: SentinelLocalIndex = Depends(get_loaded_index),
++) -> ScoreResponse:
++    """
++    Score a conversation against loaded banks.
++
++    Args:
++        request: The scoring request containing text samples.
++        index: The loaded SentinelLocalIndex (injected via dependency).
++
++    Returns:
++        ScoreResponse with overall and individual scores.
++    """
++    LOG.info(f"Scoring {len(request.texts)} text samples")
++
++    # Use request parameters or fall back to defaults
++    top_k = request.top_k or settings.default_top_k
++    min_score = request.min_score_to_consider or settings.default_min_score
++
++    # Import skewness with configurable min_size_of_scores
++    from sentinel.score_formulae import skewness
++    from functools import partial
++
++    aggregation_fn = partial(skewness, min_size_of_scores=settings.default_min_size_of_scores)
++
++    # Calculate rare class affinity using the loaded index
++    result = index.calculate_rare_class_affinity(
++        text_samples=request.texts,
++        top_k=top_k,
++        min_score_to_consider=min_score,
++        aggregation_function=aggregation_fn,
++    )
++
++    LOG.info(f"Scoring complete. Affinity score: {result.rare_class_affinity_score:.4f}")
++
++    return ScoreResponse(
++        rare_class_affinity_score=result.rare_class_affinity_score,
++        observation_scores=result.observation_scores,
++        num_observations=len(request.texts),
++    )
+diff -ruN orig/api/schemas.py new/api/schemas.py
+--- orig/api/schemas.py	1969-12-31 19:00:00
++++ new/api/schemas.py	2026-08-12 15:31:35
+@@ -0,0 +1,240 @@
++# Copyright 2025 Roblox Corporation
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     https://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++"""Pydantic schemas for Sentinel API requests and responses."""
++
++from typing import Dict, List, Optional, Any
++from pydantic import BaseModel, Field
++
++
++# ============================================================================
++# Scoring Schemas
++# ============================================================================
++
++
++class ScoreRequest(BaseModel):
++    """Request schema for scoring a conversation."""
++
++    texts: List[str] = Field(
++        ...,
++        description="List of text samples (e.g., messages in a conversation) to score",
++        min_length=1,
++    )
++    top_k: Optional[int] = Field(
++        default=5,
++        description="Number of nearest neighbors to consider for scoring",
++        ge=1,
++        le=100,
++    )
++    min_score_to_consider: Optional[float] = Field(
++        default=0.1,
++        description="Threshold below which individual scores are set to 0",
++        ge=0.0,
++        le=1.0,
++    )
++
++    model_config = {
++        "json_schema_extra": {
++            "examples": [
++                {
++                    "texts": [
++                        "Hello, how are you?",
++                        "I'm doing great, thanks!",
++                        "Want to meet up later?",
++                    ],
++                    "top_k": 5,
++                    "min_score_to_consider": 0.1,
++                }
++            ]
++        }
++    }
++
++
++class ScoreResponse(BaseModel):
++    """Response schema for scoring results."""
++
++    rare_class_affinity_score: float = Field(
++        ...,
++        description="Aggregated score indicating overall affinity to the rare class (using skewness)",
++    )
++    observation_scores: Dict[str, float] = Field(
++        ...,
++        description="Individual score for each input text sample",
++    )
++    num_observations: int = Field(
++        ...,
++        description="Number of text samples scored",
++    )
++
++    model_config = {
++        "json_schema_extra": {
++            "examples": [
++                {
++                    "rare_class_affinity_score": 0.234,
++                    "observation_scores": {
++                        "Hello, how are you?": 0.02,
++                        "I'm doing great, thanks!": 0.01,
++                        "Want to meet up later?": 0.15,
++                    },
++                    "num_observations": 3,
++                }
++            ]
++        }
++    }
++
++
++# ============================================================================
++# Bank Management Schemas
++# ============================================================================
++
++
++class LoadBanksRequest(BaseModel):
++    """Request schema for loading existing banks from a path."""
++
++    path: str = Field(
++        ...,
++        description="Path to the directory containing embeddings.safetensors and config JSON",
++    )
++    negative_to_positive_ratio: Optional[float] = Field(
++        default=1.0,
++        description="Ratio of negative examples to keep relative to positive examples",
++        gt=0.0,
++    )
++
++    model_config = {
++        "json_schema_extra": {
++            "examples": [
++                {
++                    "path": "/data/banks/hate_speech_model",
++                    "negative_to_positive_ratio": 1.0,
++                }
++            ]
++        }
++    }
++
++
++class CreateBanksRequest(BaseModel):
++    """Request schema for creating new banks from text files."""
++
++    positive_folder: str = Field(
++        ...,
++        description="Path to folder containing positive (rare class) text files",
++    )
++    negative_folder: str = Field(
++        ...,
++        description="Path to folder containing negative (common class) text files",
++    )
++    output_path: str = Field(
++        ...,
++        description="Path where the new banks will be saved",
++    )
++    model_name: Optional[str] = Field(
++        default="all-MiniLM-L6-v2",
++        description="Name of the sentence transformer model to use for embeddings",
++    )
++    file_extensions: Optional[List[str]] = Field(
++        default=[".txt", ".md"],
++        description="File extensions to include when reading text files",
++    )
++    model_card: Optional[Dict[str, Any]] = Field(
++        default=None,
++        description="Optional metadata about the banks being created",
++    )
++
++    model_config = {
++        "json_schema_extra": {
++            "examples": [
++                {
++                    "positive_folder": "/data/positive_texts",
++                    "negative_folder": "/data/negative_texts",
++                    "output_path": "/data/banks/my_new_model",
++                    "model_name": "all-MiniLM-L6-v2",
++                    "file_extensions": [".txt", ".md"],
++                    "model_card": {
++                        "description": "Custom harm detection model",
++                        "created_by": "user",
++                    },
++                }
++            ]
++        }
++    }
++
++
++class BankStatusResponse(BaseModel):
++    """Response schema for bank status."""
++
++    loaded: bool = Field(..., description="Whether banks are currently loaded")
++    model_name: Optional[str] = Field(
++        None, description="Name of the encoder model used"
++    )
++    positive_count: Optional[int] = Field(
++        None, description="Number of positive (rare class) examples"
++    )
++    negative_count: Optional[int] = Field(
++        None, description="Number of negative (common class) examples"
++    )
++    model_card: Optional[Dict[str, Any]] = Field(
++        None, description="Metadata about the loaded model"
++    )
++
++    model_config = {
++        "json_schema_extra": {
++            "examples": [
++                {
++                    "loaded": True,
++                    "model_name": "all-MiniLM-L6-v2",
++                    "positive_count": 2500,
++                    "negative_count": 25000,
++                    "model_card": {"description": "Hate speech detection model"},
++                }
++            ]
++        }
++    }
++
++
++class LoadBanksResponse(BaseModel):
++    """Response schema for loading banks."""
++
++    success: bool = Field(..., description="Whether the banks were loaded successfully")
++    message: str = Field(..., description="Status message")
++    status: BankStatusResponse = Field(..., description="Current bank status")
++
++
++class CreateBanksResponse(BaseModel):
++    """Response schema for creating banks."""
++
++    success: bool = Field(
++        ..., description="Whether the banks were created successfully"
++    )
++    message: str = Field(..., description="Status message")
++    output_path: str = Field(..., description="Path where the banks were saved")
++    positive_count: int = Field(
++        ..., description="Number of positive examples processed"
++    )
++    negative_count: int = Field(
++        ..., description="Number of negative examples processed"
++    )
++
++
++# ============================================================================
++# Health Check Schemas
++# ============================================================================
++
++
++class HealthResponse(BaseModel):
++    """Response schema for health check endpoint."""
++
++    status: str = Field(..., description="Health status")
++    banks_loaded: bool = Field(..., description="Whether banks are loaded")
++    version: str = Field(..., description="API version")
