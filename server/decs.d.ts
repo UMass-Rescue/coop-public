@@ -262,6 +262,7 @@ namespace NodeJS {
     GOOGLE_PLACES_API_KEY?: string;
     READ_ME_JWT_SECRET?: string;
     OPEN_AI_API_KEY?: string;
+    SENTINEL_API_URL?: string;
     SLACK_APP_BEARER_TOKEN?: string;
     GRAPHQL_OPAQUE_SCALAR_SECRET?: string;
   }
