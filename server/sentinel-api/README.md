@@ -10,25 +10,36 @@ Roblox's own [`Dockerfile`](https://github.com/Roblox/sentinel/blob/main/Dockerf
 _library_ and run example scripts — there's no HTTP service upstream. Coop previously depended on the
 [UMass-Rescue/Sentinel](https://github.com/UMass-Rescue/Sentinel) fork, which vendored an equivalent FastAPI
 layer directly into a full clone of the library. This directory replaces that fork: the `Dockerfile` installs
-the **unmodified upstream Roblox library** at a pinned commit, then applies
-`patches/0001-add-fastapi-api-layer.patch` to it, which adds a small `sentinel.api` package (owned by Coop) on
-top so `sentinel.api.*` imports resolve against the installed `sentinel` package.
+the **unmodified upstream Roblox library** at a pinned commit as a normal Python dependency, and `app/` is
+Coop's own small FastAPI application that imports it — the same way any other consumer of the `sentinel`
+package would.
 
 ```text
 server/sentinel-api/
-  Dockerfile                                   # installs Roblox/sentinel (pinned), applies the patch below
-  patches/0001-add-fastapi-api-layer.patch      # adds sentinel/api/{main,config,schemas,dependencies,routes/*}.py
+  Dockerfile              # installs Roblox/sentinel (pinned) + FastAPI deps, copies app/ in
+  app/                    # Coop-owned FastAPI app — plain source, reviewable/editable like any other file
+    main.py                 # app factory, lifespan (auto-loads banks on startup), /health route
+    config.py                # env-driven settings (SENTINEL_* prefix)
+    dependencies.py           # IndexManager: loads/holds a SentinelLocalIndex, wraps sentinel.* calls
+    schemas.py                 # request/response models
+    routes/
+      scoring.py                # POST /score
+      banks.py                   # /banks/{status,load,create,unload}
 ```
 
-Patching the installed library (instead of vendoring the FastAPI files directly in this repo) keeps this
-directory's footprint small — a Dockerfile plus a small amount of config, the same shape as `hma/` at the
-repo root — rather than a full mini Python package sitting in the Coop monorepo. It lives under `server/`
-because `server/services/sentinelService` is its only consumer.
+`app/` lives under `server/sentinel-api/` (not e.g. `server/services/`) because it's a separate Python
+process, packaged into its own image — the same shape as `hma/` at the repo root. It's the only thing in this
+directory that's Coop-authored; everything it depends on (`fastapi`, `uvicorn`, `pydantic-settings`, and the
+`sentinel` package itself) is installed normally in the `Dockerfile`.
 
-The files added by the patch are not Coop originals — they were carried over from the API layer the UMass
-fork built, since re-deriving the same FastAPI wrapper would just reproduce the same code. They carry
-Roblox's original Apache-2.0 license header from that fork and are unmodified aside from import paths, which
-already matched the upstream `sentinel` package layout.
+`app/` originated as the API layer the UMass fork built directly into a `sentinel` clone; moving here, its
+files were adapted to import the **installed** `sentinel` package (`from sentinel.sentinel_local_index import
+...`, etc.) instead of relative imports into a sibling source tree, and its own internal imports
+(`app.config`, `app.schemas`, ...) were made relative to `app/` rather than nested under `sentinel.api.*`.
+They keep the original Apache-2.0 license header. `app/dependencies.py` and `app/routes/scoring.py` are the
+files that actually reach into `sentinel`'s internals (`sentinel.sentinel_local_index`,
+`sentinel.embeddings.sbert`, `sentinel.score_formulae`, `sentinel.io.index_io`) — if Roblox renames or moves
+any of those, those two files need matching updates.
 
 ## Upgrading the pinned commit
 
@@ -37,10 +48,9 @@ a tag or `main`. To bump it:
 
 1. Pick a new commit from [Roblox/sentinel](https://github.com/Roblox/sentinel/commits/main).
 2. Update `ARG SENTINEL_COMMIT=...` in `Dockerfile`.
-3. Rebuild: `docker build -t sentinel-api .`. If the patch step fails to apply, the API layer's imports have
-   drifted from the new commit — see "Editing the API layer" below to inspect and regenerate it. It depends on
-   `sentinel.sentinel_local_index`, `sentinel.embeddings.sbert`, `sentinel.score_formulae`, and
-   `sentinel.io.index_io`; if Roblox renames/moves any of those, the patched files need the same update.
+3. Rebuild: `docker build -t sentinel-api server/sentinel-api/`. If it fails on import errors from `app/`,
+   `sentinel`'s internal module layout has moved — update the imports in `app/dependencies.py` and/or
+   `app/routes/scoring.py` to match (see the previous section for exactly which modules they touch).
 4. Smoke test: `docker run --rm -p 8000:8000 sentinel-api`, then `curl http://localhost:8000/health`.
 
 This is a new external dependency pinned by commit SHA (Apache-2.0, compatible with Coop's license) —
@@ -48,19 +58,8 @@ per `AGENTS.md`, it needs human sign-off before merging, same as any new/upgrade
 
 ## Editing the API layer
 
-The patch adds files under `sentinel/api/` (relative to the installed `sentinel` package, i.e. what would be
-`src/sentinel/api/` in an upstream Roblox checkout). To change one of those files:
-
-1. Apply the current patch to a scratch copy of the pinned commit and edit there, or edit the patch's `+`
-   lines directly for small changes.
-2. Regenerate the patch from the edited tree, e.g.:
-
-   ```bash
-   # from a directory containing only the old sentinel/api/ tree ("orig") and the new one ("new")
-   diff -ruN orig new > server/sentinel-api/patches/0001-add-fastapi-api-layer.patch
-   ```
-
-3. Confirm it applies cleanly: `docker build -t sentinel-api server/sentinel-api/`.
+`app/` is normal Python source, versioned directly in this repo — edit it like any other file in Coop. No
+patch generation or regeneration step is needed; changes show up as an ordinary diff in review.
 
 ## Local dev
 
