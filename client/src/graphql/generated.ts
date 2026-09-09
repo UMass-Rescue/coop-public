@@ -1372,6 +1372,32 @@ export type GQLGooglePlaceLocationInfo = {
   readonly id: Scalars['ID']['output'];
 };
 
+export type GQLHandleTime = {
+  readonly __typename: 'HandleTime';
+  readonly handleTimeSeconds?: Maybe<Scalars['Int']['output']>;
+  readonly queueId?: Maybe<Scalars['String']['output']>;
+  readonly reviewerId?: Maybe<Scalars['String']['output']>;
+};
+
+export type GQLHandleTimeFilterByInput = {
+  readonly endDate: Scalars['DateTime']['input'];
+  readonly queueIds: ReadonlyArray<Scalars['String']['input']>;
+  readonly reviewerIds: ReadonlyArray<Scalars['String']['input']>;
+  readonly startDate: Scalars['DateTime']['input'];
+};
+
+export const GQLHandleTimeGroupByColumns = {
+  QueueId: 'QUEUE_ID',
+  ReviewerId: 'REVIEWER_ID',
+} as const;
+
+export type GQLHandleTimeGroupByColumns =
+  (typeof GQLHandleTimeGroupByColumns)[keyof typeof GQLHandleTimeGroupByColumns];
+export type GQLHandleTimeInput = {
+  readonly filterBy: GQLHandleTimeFilterByInput;
+  readonly groupBy: ReadonlyArray<GQLHandleTimeGroupByColumns>;
+};
+
 export type GQLHashBank = {
   readonly __typename: 'HashBank';
   readonly description?: Maybe<Scalars['String']['output']>;
@@ -2116,12 +2142,14 @@ export type GQLManualReviewChartSettingsInput = {
 
 export type GQLManualReviewDecision = {
   readonly __typename: 'ManualReviewDecision';
+  readonly assignedAt?: Maybe<Scalars['DateTime']['output']>;
   readonly createdAt: Scalars['DateTime']['output'];
   readonly decisionReason?: Maybe<Scalars['String']['output']>;
   readonly decisions: ReadonlyArray<GQLManualReviewDecisionComponent>;
   readonly id: Scalars['String']['output'];
   readonly itemId?: Maybe<Scalars['String']['output']>;
   readonly itemTypeId?: Maybe<Scalars['String']['output']>;
+  readonly jobCreatedAt?: Maybe<Scalars['DateTime']['output']>;
   readonly jobId: Scalars['String']['output'];
   readonly queueId: Scalars['String']['output'];
   readonly relatedActions: ReadonlyArray<GQLManualReviewDecisionComponent>;
@@ -3076,6 +3104,7 @@ export type GQLNcmecManualReviewJobPayload = {
   readonly allMediaItems: ReadonlyArray<GQLNcmecContentItem>;
   readonly enqueueSourceInfo?: Maybe<GQLManualReviewJobEnqueueSourceInfo>;
   readonly item: GQLUserItem;
+  readonly reportedMessages: ReadonlyArray<GQLItemIdentifier>;
   readonly userScore?: Maybe<Scalars['Int']['output']>;
 };
 
@@ -3328,6 +3357,11 @@ export type GQLPartialItemsSuccessResponse = {
   readonly items: ReadonlyArray<GQLItem>;
 };
 
+export type GQLPasswordRequirements = {
+  readonly __typename: 'PasswordRequirements';
+  readonly minLength: Scalars['Int']['output'];
+};
+
 export type GQLPendingInvite = {
   readonly __typename: 'PendingInvite';
   readonly createdAt: Scalars['DateTime']['output'];
@@ -3447,6 +3481,7 @@ export type GQLQuery = {
   readonly getExistingJobsForItem: ReadonlyArray<GQLManualReviewExistingJob>;
   readonly getFullReportingRuleResultForItem: GQLGetFullReportingRuleResultForItemResponse;
   readonly getFullRuleResultForItem: GQLGetFullResultForItemResponse;
+  readonly getHandleTime?: Maybe<ReadonlyArray<GQLHandleTime>>;
   readonly getJobCreationCounts: ReadonlyArray<GQLJobCreationCount>;
   readonly getRecentDecisions: ReadonlyArray<GQLManualReviewDecision>;
   readonly getResolvedJobCounts: ReadonlyArray<GQLResolvedJobCount>;
@@ -3483,6 +3518,7 @@ export type GQLQuery = {
   readonly ncmecThreads: ReadonlyArray<GQLThreadWithMessagesAndIpAddress>;
   readonly org?: Maybe<GQLOrg>;
   readonly partialItems: GQLPartialItemsResponse;
+  readonly passwordRequirements: GQLPasswordRequirements;
   /** Server-owned grouping + ordering for the role-editor UI. Gated on MANAGE_ROLES. */
   readonly permissionGroups: ReadonlyArray<GQLPermissionGroup>;
   readonly policy?: Maybe<GQLPolicy>;
@@ -3544,6 +3580,10 @@ export type GQLQueryGetFullReportingRuleResultForItemArgs = {
 
 export type GQLQueryGetFullRuleResultForItemArgs = {
   input: GQLGetFullResultForItemInput;
+};
+
+export type GQLQueryGetHandleTimeArgs = {
+  input: GQLHandleTimeInput;
 };
 
 export type GQLQueryGetJobCreationCountsArgs = {
@@ -4554,6 +4594,8 @@ export type GQLSubmitDecisionResponse =
 export type GQLSubmitDecisionSuccessResponse = {
   readonly __typename: 'SubmitDecisionSuccessResponse';
   readonly success: Scalars['Boolean']['output'];
+  /** Non-blocking, reviewer-facing notices about the decision (e.g. an NCMEC escalation that was skipped because the user was already reported). Surfaced as toasts. */
+  readonly warnings: ReadonlyArray<Scalars['String']['output']>;
 };
 
 export type GQLSubmitNcmecReportDecisionComponent =
@@ -5494,6 +5536,18 @@ export type GQLUpdateExchangeCredentialsMutationVariables = Exact<{
 export type GQLUpdateExchangeCredentialsMutation = {
   readonly __typename: 'Mutation';
   readonly updateExchangeCredentials: boolean;
+};
+
+export type GQLPasswordRequirementsQueryVariables = Exact<{
+  [key: string]: never;
+}>;
+
+export type GQLPasswordRequirementsQuery = {
+  readonly __typename: 'Query';
+  readonly passwordRequirements: {
+    readonly __typename: 'PasswordRequirements';
+    readonly minLength: number;
+  };
 };
 
 export type GQLUserAndOrgQueryVariables = Exact<{ [key: string]: never }>;
@@ -8999,6 +9053,11 @@ export type GQLGetDecidedJobFromJobIdQuery = {
                     };
                   };
             }>;
+            readonly reportedMessages: ReadonlyArray<{
+              readonly __typename: 'ItemIdentifier';
+              readonly id: string;
+              readonly typeId: string;
+            }>;
             readonly enqueueSourceInfo?:
               | { readonly __typename: 'AppealEnqueueSourceInfo' }
               | {
@@ -9652,6 +9711,8 @@ export type GQLGetDecidedJobFromJobIdQuery = {
       readonly jobId: string;
       readonly decisionReason?: string | null;
       readonly createdAt: Date | string;
+      readonly assignedAt?: Date | string | null;
+      readonly jobCreatedAt?: Date | string | null;
       readonly decisions: ReadonlyArray<
         | {
             readonly __typename: 'AcceptAppealDecisionComponent';
@@ -9774,6 +9835,20 @@ export type GQLGetAverageTimeToReviewQuery = {
   readonly getTimeToAction?: ReadonlyArray<{
     readonly __typename: 'TimeToAction';
     readonly timeToAction?: number | null;
+    readonly queueId?: string | null;
+  }> | null;
+};
+
+export type GQLGetAverageHandleTimeSummaryQueryVariables = Exact<{
+  input: GQLHandleTimeInput;
+}>;
+
+export type GQLGetAverageHandleTimeSummaryQuery = {
+  readonly __typename: 'Query';
+  readonly getHandleTime?: ReadonlyArray<{
+    readonly __typename: 'HandleTime';
+    readonly handleTimeSeconds?: number | null;
+    readonly reviewerId?: string | null;
     readonly queueId?: string | null;
   }> | null;
 };
@@ -10786,6 +10861,8 @@ export type GQLGetRecentDecisionsQuery = {
     readonly itemId?: string | null;
     readonly itemTypeId?: string | null;
     readonly createdAt: Date | string;
+    readonly assignedAt?: Date | string | null;
+    readonly jobCreatedAt?: Date | string | null;
     readonly decisionReason?: string | null;
     readonly decisions: ReadonlyArray<
       | {
@@ -11586,6 +11663,11 @@ export type GQLGetDecidedJobQuery = {
                     }>;
                   };
                 };
+          }>;
+          readonly reportedMessages: ReadonlyArray<{
+            readonly __typename: 'ItemIdentifier';
+            readonly id: string;
+            readonly typeId: string;
           }>;
           readonly enqueueSourceInfo?:
             | { readonly __typename: 'AppealEnqueueSourceInfo' }
@@ -13296,6 +13378,11 @@ export type GQLManualReviewJobInfoQuery = {
                       };
                     };
               }>;
+              readonly reportedMessages: ReadonlyArray<{
+                readonly __typename: 'ItemIdentifier';
+                readonly id: string;
+                readonly typeId: string;
+              }>;
               readonly enqueueSourceInfo?:
                 | { readonly __typename: 'AppealEnqueueSourceInfo' }
                 | {
@@ -14637,6 +14724,11 @@ export type GQLDequeueManualReviewJobMutation = {
                     };
                   };
             }>;
+            readonly reportedMessages: ReadonlyArray<{
+              readonly __typename: 'ItemIdentifier';
+              readonly id: string;
+              readonly typeId: string;
+            }>;
             readonly enqueueSourceInfo?:
               | { readonly __typename: 'AppealEnqueueSourceInfo' }
               | {
@@ -15324,6 +15416,7 @@ export type GQLSubmitManualReviewDecisionMutation = {
     | {
         readonly __typename: 'SubmitDecisionSuccessResponse';
         readonly success: boolean;
+        readonly warnings: ReadonlyArray<string>;
       }
     | {
         readonly __typename: 'SubmittedJobActionNotFoundError';
@@ -16034,6 +16127,11 @@ export type GQLJobFieldsFragment = {
                   }>;
                 };
               };
+        }>;
+        readonly reportedMessages: ReadonlyArray<{
+          readonly __typename: 'ItemIdentifier';
+          readonly id: string;
+          readonly typeId: string;
         }>;
         readonly enqueueSourceInfo?:
           | { readonly __typename: 'AppealEnqueueSourceInfo' }
@@ -18539,6 +18637,20 @@ export type GQLReorderRoutingRulesMutation = {
       readonly id: string;
     }>;
   };
+};
+
+export type GQLGetAverageHandleTimeQueryVariables = Exact<{
+  input: GQLHandleTimeInput;
+}>;
+
+export type GQLGetAverageHandleTimeQuery = {
+  readonly __typename: 'Query';
+  readonly getHandleTime?: ReadonlyArray<{
+    readonly __typename: 'HandleTime';
+    readonly handleTimeSeconds?: number | null;
+    readonly reviewerId?: string | null;
+    readonly queueId?: string | null;
+  }> | null;
 };
 
 export type GQLManualReviewChartConfigurationSettingsQueryVariables = Exact<{
@@ -25703,6 +25815,10 @@ export const GQLJobFieldsFragmentDoc = gql`
           isConfirmedCSAM
           isReported
         }
+        reportedMessages {
+          id
+          typeId
+        }
         enqueueSourceInfo {
           ... on ReportEnqueueSourceInfo {
             kind
@@ -27192,6 +27308,104 @@ export type GQLUpdateExchangeCredentialsMutationOptions =
     GQLUpdateExchangeCredentialsMutation,
     GQLUpdateExchangeCredentialsMutationVariables
   >;
+export const GQLPasswordRequirementsDocument = gql`
+  query PasswordRequirements {
+    passwordRequirements {
+      minLength
+    }
+  }
+`;
+
+/**
+ * __useGQLPasswordRequirementsQuery__
+ *
+ * To run a query within a React component, call `useGQLPasswordRequirementsQuery` and pass it any options that fit your needs.
+ * When your component renders, `useGQLPasswordRequirementsQuery` returns an object from Apollo Client that contains loading, error, and data properties
+ * you can use to render your UI.
+ *
+ * @param baseOptions options that will be passed into the query, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options;
+ *
+ * @example
+ * const { data, loading, error } = useGQLPasswordRequirementsQuery({
+ *   variables: {
+ *   },
+ * });
+ */
+export function useGQLPasswordRequirementsQuery(
+  baseOptions?: Apollo.QueryHookOptions<
+    GQLPasswordRequirementsQuery,
+    GQLPasswordRequirementsQueryVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return Apollo.useQuery<
+    GQLPasswordRequirementsQuery,
+    GQLPasswordRequirementsQueryVariables
+  >(GQLPasswordRequirementsDocument, options);
+}
+export function useGQLPasswordRequirementsLazyQuery(
+  baseOptions?: Apollo.LazyQueryHookOptions<
+    GQLPasswordRequirementsQuery,
+    GQLPasswordRequirementsQueryVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return Apollo.useLazyQuery<
+    GQLPasswordRequirementsQuery,
+    GQLPasswordRequirementsQueryVariables
+  >(GQLPasswordRequirementsDocument, options);
+}
+// @ts-ignore
+export function useGQLPasswordRequirementsSuspenseQuery(
+  baseOptions?: Apollo.SuspenseQueryHookOptions<
+    GQLPasswordRequirementsQuery,
+    GQLPasswordRequirementsQueryVariables
+  >,
+): Apollo.UseSuspenseQueryResult<
+  GQLPasswordRequirementsQuery,
+  GQLPasswordRequirementsQueryVariables
+>;
+export function useGQLPasswordRequirementsSuspenseQuery(
+  baseOptions?:
+    | Apollo.SkipToken
+    | Apollo.SuspenseQueryHookOptions<
+        GQLPasswordRequirementsQuery,
+        GQLPasswordRequirementsQueryVariables
+      >,
+): Apollo.UseSuspenseQueryResult<
+  GQLPasswordRequirementsQuery | undefined,
+  GQLPasswordRequirementsQueryVariables
+>;
+export function useGQLPasswordRequirementsSuspenseQuery(
+  baseOptions?:
+    | Apollo.SkipToken
+    | Apollo.SuspenseQueryHookOptions<
+        GQLPasswordRequirementsQuery,
+        GQLPasswordRequirementsQueryVariables
+      >,
+) {
+  const options =
+    baseOptions === Apollo.skipToken
+      ? baseOptions
+      : { ...defaultOptions, ...baseOptions };
+  return Apollo.useSuspenseQuery<
+    GQLPasswordRequirementsQuery,
+    GQLPasswordRequirementsQueryVariables
+  >(GQLPasswordRequirementsDocument, options);
+}
+export type GQLPasswordRequirementsQueryHookResult = ReturnType<
+  typeof useGQLPasswordRequirementsQuery
+>;
+export type GQLPasswordRequirementsLazyQueryHookResult = ReturnType<
+  typeof useGQLPasswordRequirementsLazyQuery
+>;
+export type GQLPasswordRequirementsSuspenseQueryHookResult = ReturnType<
+  typeof useGQLPasswordRequirementsSuspenseQuery
+>;
+export type GQLPasswordRequirementsQueryResult = Apollo.QueryResult<
+  GQLPasswordRequirementsQuery,
+  GQLPasswordRequirementsQueryVariables
+>;
 export const GQLUserAndOrgDocument = gql`
   query UserAndOrg {
     me {
@@ -32171,6 +32385,8 @@ export const GQLGetDecidedJobFromJobIdDocument = gql`
           }
         }
         createdAt
+        assignedAt
+        jobCreatedAt
       }
     }
   }
@@ -32478,6 +32694,114 @@ export type GQLGetAverageTimeToReviewSuspenseQueryHookResult = ReturnType<
 export type GQLGetAverageTimeToReviewQueryResult = Apollo.QueryResult<
   GQLGetAverageTimeToReviewQuery,
   GQLGetAverageTimeToReviewQueryVariables
+>;
+export const GQLGetAverageHandleTimeSummaryDocument = gql`
+  query getAverageHandleTimeSummary($input: HandleTimeInput!) {
+    getHandleTime(input: $input) {
+      handleTimeSeconds
+      reviewerId
+      queueId
+    }
+  }
+`;
+
+/**
+ * __useGQLGetAverageHandleTimeSummaryQuery__
+ *
+ * To run a query within a React component, call `useGQLGetAverageHandleTimeSummaryQuery` and pass it any options that fit your needs.
+ * When your component renders, `useGQLGetAverageHandleTimeSummaryQuery` returns an object from Apollo Client that contains loading, error, and data properties
+ * you can use to render your UI.
+ *
+ * @param baseOptions options that will be passed into the query, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options;
+ *
+ * @example
+ * const { data, loading, error } = useGQLGetAverageHandleTimeSummaryQuery({
+ *   variables: {
+ *      input: // value for 'input'
+ *   },
+ * });
+ */
+export function useGQLGetAverageHandleTimeSummaryQuery(
+  baseOptions: Apollo.QueryHookOptions<
+    GQLGetAverageHandleTimeSummaryQuery,
+    GQLGetAverageHandleTimeSummaryQueryVariables
+  > &
+    (
+      | {
+          variables: GQLGetAverageHandleTimeSummaryQueryVariables;
+          skip?: boolean;
+        }
+      | { skip: boolean }
+    ),
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return Apollo.useQuery<
+    GQLGetAverageHandleTimeSummaryQuery,
+    GQLGetAverageHandleTimeSummaryQueryVariables
+  >(GQLGetAverageHandleTimeSummaryDocument, options);
+}
+export function useGQLGetAverageHandleTimeSummaryLazyQuery(
+  baseOptions?: Apollo.LazyQueryHookOptions<
+    GQLGetAverageHandleTimeSummaryQuery,
+    GQLGetAverageHandleTimeSummaryQueryVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return Apollo.useLazyQuery<
+    GQLGetAverageHandleTimeSummaryQuery,
+    GQLGetAverageHandleTimeSummaryQueryVariables
+  >(GQLGetAverageHandleTimeSummaryDocument, options);
+}
+// @ts-ignore
+export function useGQLGetAverageHandleTimeSummarySuspenseQuery(
+  baseOptions?: Apollo.SuspenseQueryHookOptions<
+    GQLGetAverageHandleTimeSummaryQuery,
+    GQLGetAverageHandleTimeSummaryQueryVariables
+  >,
+): Apollo.UseSuspenseQueryResult<
+  GQLGetAverageHandleTimeSummaryQuery,
+  GQLGetAverageHandleTimeSummaryQueryVariables
+>;
+export function useGQLGetAverageHandleTimeSummarySuspenseQuery(
+  baseOptions?:
+    | Apollo.SkipToken
+    | Apollo.SuspenseQueryHookOptions<
+        GQLGetAverageHandleTimeSummaryQuery,
+        GQLGetAverageHandleTimeSummaryQueryVariables
+      >,
+): Apollo.UseSuspenseQueryResult<
+  GQLGetAverageHandleTimeSummaryQuery | undefined,
+  GQLGetAverageHandleTimeSummaryQueryVariables
+>;
+export function useGQLGetAverageHandleTimeSummarySuspenseQuery(
+  baseOptions?:
+    | Apollo.SkipToken
+    | Apollo.SuspenseQueryHookOptions<
+        GQLGetAverageHandleTimeSummaryQuery,
+        GQLGetAverageHandleTimeSummaryQueryVariables
+      >,
+) {
+  const options =
+    baseOptions === Apollo.skipToken
+      ? baseOptions
+      : { ...defaultOptions, ...baseOptions };
+  return Apollo.useSuspenseQuery<
+    GQLGetAverageHandleTimeSummaryQuery,
+    GQLGetAverageHandleTimeSummaryQueryVariables
+  >(GQLGetAverageHandleTimeSummaryDocument, options);
+}
+export type GQLGetAverageHandleTimeSummaryQueryHookResult = ReturnType<
+  typeof useGQLGetAverageHandleTimeSummaryQuery
+>;
+export type GQLGetAverageHandleTimeSummaryLazyQueryHookResult = ReturnType<
+  typeof useGQLGetAverageHandleTimeSummaryLazyQuery
+>;
+export type GQLGetAverageHandleTimeSummarySuspenseQueryHookResult = ReturnType<
+  typeof useGQLGetAverageHandleTimeSummarySuspenseQuery
+>;
+export type GQLGetAverageHandleTimeSummaryQueryResult = Apollo.QueryResult<
+  GQLGetAverageHandleTimeSummaryQuery,
+  GQLGetAverageHandleTimeSummaryQueryVariables
 >;
 export const GQLGetDecisionsTableDocument = gql`
   query getDecisionsTable($input: GetDecisionCountsTableInput!) {
@@ -34026,6 +34350,8 @@ export const GQLGetRecentDecisionsDocument = gql`
         }
       }
       createdAt
+      assignedAt
+      jobCreatedAt
       decisionReason
     }
   }
@@ -34796,6 +35122,7 @@ export const GQLSubmitManualReviewDecisionDocument = gql`
     submitManualReviewDecision(input: $input) {
       ... on SubmitDecisionSuccessResponse {
         success
+        warnings
       }
       ... on JobHasAlreadyBeenSubmittedError {
         title
@@ -37317,6 +37644,111 @@ export type GQLReorderRoutingRulesMutationResult =
 export type GQLReorderRoutingRulesMutationOptions = Apollo.BaseMutationOptions<
   GQLReorderRoutingRulesMutation,
   GQLReorderRoutingRulesMutationVariables
+>;
+export const GQLGetAverageHandleTimeDocument = gql`
+  query getAverageHandleTime($input: HandleTimeInput!) {
+    getHandleTime(input: $input) {
+      handleTimeSeconds
+      reviewerId
+      queueId
+    }
+  }
+`;
+
+/**
+ * __useGQLGetAverageHandleTimeQuery__
+ *
+ * To run a query within a React component, call `useGQLGetAverageHandleTimeQuery` and pass it any options that fit your needs.
+ * When your component renders, `useGQLGetAverageHandleTimeQuery` returns an object from Apollo Client that contains loading, error, and data properties
+ * you can use to render your UI.
+ *
+ * @param baseOptions options that will be passed into the query, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options;
+ *
+ * @example
+ * const { data, loading, error } = useGQLGetAverageHandleTimeQuery({
+ *   variables: {
+ *      input: // value for 'input'
+ *   },
+ * });
+ */
+export function useGQLGetAverageHandleTimeQuery(
+  baseOptions: Apollo.QueryHookOptions<
+    GQLGetAverageHandleTimeQuery,
+    GQLGetAverageHandleTimeQueryVariables
+  > &
+    (
+      | { variables: GQLGetAverageHandleTimeQueryVariables; skip?: boolean }
+      | { skip: boolean }
+    ),
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return Apollo.useQuery<
+    GQLGetAverageHandleTimeQuery,
+    GQLGetAverageHandleTimeQueryVariables
+  >(GQLGetAverageHandleTimeDocument, options);
+}
+export function useGQLGetAverageHandleTimeLazyQuery(
+  baseOptions?: Apollo.LazyQueryHookOptions<
+    GQLGetAverageHandleTimeQuery,
+    GQLGetAverageHandleTimeQueryVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return Apollo.useLazyQuery<
+    GQLGetAverageHandleTimeQuery,
+    GQLGetAverageHandleTimeQueryVariables
+  >(GQLGetAverageHandleTimeDocument, options);
+}
+// @ts-ignore
+export function useGQLGetAverageHandleTimeSuspenseQuery(
+  baseOptions?: Apollo.SuspenseQueryHookOptions<
+    GQLGetAverageHandleTimeQuery,
+    GQLGetAverageHandleTimeQueryVariables
+  >,
+): Apollo.UseSuspenseQueryResult<
+  GQLGetAverageHandleTimeQuery,
+  GQLGetAverageHandleTimeQueryVariables
+>;
+export function useGQLGetAverageHandleTimeSuspenseQuery(
+  baseOptions?:
+    | Apollo.SkipToken
+    | Apollo.SuspenseQueryHookOptions<
+        GQLGetAverageHandleTimeQuery,
+        GQLGetAverageHandleTimeQueryVariables
+      >,
+): Apollo.UseSuspenseQueryResult<
+  GQLGetAverageHandleTimeQuery | undefined,
+  GQLGetAverageHandleTimeQueryVariables
+>;
+export function useGQLGetAverageHandleTimeSuspenseQuery(
+  baseOptions?:
+    | Apollo.SkipToken
+    | Apollo.SuspenseQueryHookOptions<
+        GQLGetAverageHandleTimeQuery,
+        GQLGetAverageHandleTimeQueryVariables
+      >,
+) {
+  const options =
+    baseOptions === Apollo.skipToken
+      ? baseOptions
+      : { ...defaultOptions, ...baseOptions };
+  return Apollo.useSuspenseQuery<
+    GQLGetAverageHandleTimeQuery,
+    GQLGetAverageHandleTimeQueryVariables
+  >(GQLGetAverageHandleTimeDocument, options);
+}
+export type GQLGetAverageHandleTimeQueryHookResult = ReturnType<
+  typeof useGQLGetAverageHandleTimeQuery
+>;
+export type GQLGetAverageHandleTimeLazyQueryHookResult = ReturnType<
+  typeof useGQLGetAverageHandleTimeLazyQuery
+>;
+export type GQLGetAverageHandleTimeSuspenseQueryHookResult = ReturnType<
+  typeof useGQLGetAverageHandleTimeSuspenseQuery
+>;
+export type GQLGetAverageHandleTimeQueryResult = Apollo.QueryResult<
+  GQLGetAverageHandleTimeQuery,
+  GQLGetAverageHandleTimeQueryVariables
 >;
 export const GQLManualReviewChartConfigurationSettingsDocument = gql`
   query ManualReviewChartConfigurationSettings {
@@ -45343,6 +45775,7 @@ export const namedOperations = {
     HashBankById: 'HashBankById',
     ExchangeApis: 'ExchangeApis',
     ExchangeApiSchema: 'ExchangeApiSchema',
+    PasswordRequirements: 'PasswordRequirements',
     UserAndOrg: 'UserAndOrg',
     LoggedInUserForRoute: 'LoggedInUserForRoute',
     PermissionGatedRouteLoggedInUser: 'PermissionGatedRouteLoggedInUser',
@@ -45377,6 +45810,7 @@ export const namedOperations = {
     getDecidedJobFromJobId: 'getDecidedJobFromJobId',
     ManualReviewMetrics: 'ManualReviewMetrics',
     getAverageTimeToReview: 'getAverageTimeToReview',
+    getAverageHandleTimeSummary: 'getAverageHandleTimeSummary',
     getDecisionsTable: 'getDecisionsTable',
     QueueFormData: 'QueueFormData',
     ManualReviewQueue: 'ManualReviewQueue',
@@ -45409,6 +45843,7 @@ export const namedOperations = {
     getUserItems: 'getUserItems',
     ManualReviewHasAppealsEnabled: 'ManualReviewHasAppealsEnabled',
     ManualReviewQueueRoutingRules: 'ManualReviewQueueRoutingRules',
+    getAverageHandleTime: 'getAverageHandleTime',
     ManualReviewChartConfigurationSettings:
       'ManualReviewChartConfigurationSettings',
     ManualReviewDecisionInsightsOrgInfo: 'ManualReviewDecisionInsightsOrgInfo',
