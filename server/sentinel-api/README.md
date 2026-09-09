@@ -61,6 +61,24 @@ per `AGENTS.md`, it needs human sign-off before merging, same as any new/upgrade
 `app/` is normal Python source, versioned directly in this repo — edit it like any other file in Coop. No
 patch generation or regeneration step is needed; changes show up as an ordinary diff in review.
 
+## Tests
+
+`tests/` covers `app/` with `pytest` — routes are tested through `fastapi.testclient.TestClient` with
+`get_loaded_index`/`get_index_manager` overridden to avoid needing a real bank or model download;
+`app/dependencies.py`'s `IndexManager` is tested directly, mocking only the `sentinel` calls that would
+otherwise hit real model weights (`SentinelLocalIndex`, `get_sentence_transformer_and_scaling_fn`).
+
+`pytest` and `httpx` (required by `TestClient`) are dev-only — they're in `requirements-dev.txt`, not the
+`Dockerfile`, so they never ship in the runtime image. Running them locally still needs the same production
+dependencies as the image itself (`torch`, `sentinel[sbert]`, `fastapi`, `uvicorn`, `pydantic-settings`), so
+the easiest way to run them is against the `builder` stage, which already has all of that installed:
+
+```bash
+docker build --target builder -t sentinel-api-builder server/sentinel-api/
+docker run --rm -v "$(pwd)/server/sentinel-api":/workspace -w /workspace sentinel-api-builder \
+  bash -c "pip install -q -r requirements-dev.txt && python -m pytest tests/ -v"
+```
+
 ## Local dev
 
 Wired via `docker-compose.sentinel.yaml` (gitignored, local-only):
