@@ -1,9 +1,7 @@
-import ChevronDown from '@/icons/lni/Direction/chevron-down.svg?react';
-import ChevronUp from '@/icons/lni/Direction/chevron-up.svg?react';
-import { FilterOutlined } from '@ant-design/icons';
 import { Button } from 'antd';
 import omit from 'lodash/omit';
 import without from 'lodash/without';
+import { ChevronDown, ChevronUp, Filter } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 import CloseButton from '@/components/common/CloseButton';
@@ -72,10 +70,17 @@ export default function TableFilter<TData extends TableData>(props: {
   };
 
   const onSave = () => {
+    const missingColumnIds: string[] = [];
     for (const [columnId, value] of Object.entries(unsavedFilterValues)) {
-      filterColumns
-        .find((column) => column.id === columnId)!
-        .setFilterValue(value);
+      const column = filterColumns.find((column) => column.id === columnId);
+      if (!column) {
+        missingColumnIds.push(columnId);
+        continue;
+      }
+      column.setFilterValue(value);
+    }
+    if (missingColumnIds.length > 0) {
+      setUnsavedFilterValues(omit(unsavedFilterValues, missingColumnIds));
     }
     setMenuVisible(false);
   };
@@ -92,9 +97,10 @@ export default function TableFilter<TData extends TableData>(props: {
 
   const removeFilter = (columnId: string) => {
     setUnsavedFilterValues(omit(unsavedFilterValues, columnId));
-    filterColumns
-      .find((column) => column.id === columnId)!
-      .setFilterValue(undefined);
+    const column = filterColumns.find((column) => column.id === columnId);
+    if (column) {
+      column.setFilterValue(undefined);
+    }
   };
 
   const activeFilters = filterColumns.filter((column) =>
@@ -112,8 +118,8 @@ export default function TableFilter<TData extends TableData>(props: {
               : 'text-white bg-[#71717a] border-none focus:text-white focus:bg-[#71717a] focus:border-none hover:text-white hover:bg-[#a1a1aa] hover:border-none'
           }`}
           icon={
-            <FilterOutlined
-              className={`font-semibold ${
+            <Filter
+              className={`w-4 h-4 font-semibold ${
                 activeFilters.length === 0 ? 'text-[#71717a]' : 'text-white'
               }`}
             />
@@ -139,7 +145,7 @@ export default function TableFilter<TData extends TableData>(props: {
       </div>
       {menuVisible && (
         <div
-          className={`flex flex-col absolute bg-white border-solid border border-[#d4d4d8] rounded shadow-md mt-1 min-w-[320px] z-20 ${
+          className={`flex flex-col absolute bg-white border-solid border border-[#d4d4d8] rounded shadow-md mt-1 min-w-[320px] z-50 ${
             isButtonFloatedRight ? 'right-0' : 'left-0'
           }`}
         >
@@ -173,9 +179,9 @@ export default function TableFilter<TData extends TableData>(props: {
                       {label}
                     </div>
                     {expanded ? (
-                      <ChevronUp className="w-3 font-bold fill-slate-400" />
+                      <ChevronUp className="w-3 h-3 text-slate-400" />
                     ) : (
-                      <ChevronDown className="w-3 font-bold fill-slate-400" />
+                      <ChevronDown className="w-3 h-3 text-slate-400" />
                     )}
                   </div>
                   {expanded && (
