@@ -1,5 +1,6 @@
 import { Button, Input } from 'antd';
 import { Plus, Trash2 } from 'lucide-react';
+import { useState } from 'react';
 
 import {
   GQLGoogleContentSafetyApiIntegrationApiCredential,
@@ -185,6 +186,79 @@ export default function IntegrationConfigApiCredentialsSection(props: {
     );
   };
 
+  // Sentinel stores its (non-secret) settings via the same generic
+  // PluginIntegrationApiCredential JSON blob as external plugins (see
+  // SentinelRareClassAffinitySignal.ts), but needs its own known field set
+  // rather than the generic key/value editor above.
+  const SENTINEL_FIELD_LABELS: Record<string, string> = {
+    apiUrl:
+      'Sentinel API URL (optional — falls back to the deployment default)',
+    topK: 'Top K (nearest neighbors to consider)',
+    minScoreToConsider: 'Minimum score to consider (0–1)',
+    threadContextWindowMinutes: 'Thread context window (minutes)',
+  };
+  const SENTINEL_NUMERIC_FIELDS = new Set([
+    'topK',
+    'minScoreToConsider',
+    'threadContextWindowMinutes',
+  ]);
+
+  // Raw text currently being typed into numeric fields, so e.g. "0." isn't
+  // clobbered mid-edit by re-rendering with `String(credential[key])`.
+  const [sentinelDrafts, setSentinelDrafts] = useState<Record<string, string>>(
+    {},
+  );
+
+  const renderSentinelCredential = (pluginCredential: {
+    __typename: 'PluginIntegrationApiCredential';
+    credential: Record<string, unknown>;
+  }) => {
+    const credential = pluginCredential.credential ?? {};
+    return (
+      <div className="flex flex-col gap-4">
+        {Object.entries(SENTINEL_FIELD_LABELS).map(([key, label]) => (
+          <div key={key} className={`flex flex-col ${inputWidthClass}`}>
+            <div className="mb-1">{label}</div>
+            <Input
+              value={
+                sentinelDrafts[key] ??
+                (credential[key] == null ? '' : String(credential[key]))
+              }
+              onChange={(event) => {
+                const raw = event.target.value;
+                setSentinelDrafts((prev) => ({ ...prev, [key]: raw }));
+
+                let next: Record<string, unknown>;
+                if (raw.trim() === '') {
+                  const { [key]: _removed, ...rest } = credential;
+                  next = rest;
+                } else if (SENTINEL_NUMERIC_FIELDS.has(key)) {
+                  const parsed = Number(raw);
+                  next = Number.isNaN(parsed)
+                    ? credential
+                    : { ...credential, [key]: parsed };
+                } else {
+                  next = { ...credential, [key]: raw };
+                }
+                setApiCredential({
+                  __typename: 'PluginIntegrationApiCredential',
+                  credential:
+                    next as import('../../../graphql/generated').Scalars['JSONObject'],
+                });
+              }}
+              onBlur={() => {
+                // Snap back to the canonical (parsed/committed) formatting
+                // once the user is done typing, e.g. "0.10" -> "0.1".
+                const { [key]: _removed, ...rest } = sentinelDrafts;
+                setSentinelDrafts(rest);
+              }}
+            />
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   const projectKeysInput = () => {
     switch (apiCredential.__typename) {
       case 'GoogleContentSafetyApiIntegrationApiCredential':
@@ -194,7 +268,9 @@ export default function IntegrationConfigApiCredentialsSection(props: {
       case 'ZentropiIntegrationApiCredential':
         return renderZentropiCredential(apiCredential);
       case 'PluginIntegrationApiCredential':
-        return renderPluginCredential(apiCredential);
+        return props.name === 'SENTINEL'
+          ? renderSentinelCredential(apiCredential)
+          : renderPluginCredential(apiCredential);
       default:
         throw new Error('Integration not implemented yet');
     }
