@@ -1,28 +1,35 @@
 # Sentinel integration — manual test plan
 
-This is a manual QA checklist for the Sentinel rare-class-affinity feature, which spans one
-independent PR and a 4-deep stack:
+This is a manual QA checklist for the Sentinel rare-class-affinity feature. The FastAPI service
+itself lives in its own repo — [UMass-Rescue/sentinel-api](https://github.com/UMass-Rescue/sentinel-api)
+— and is deployed and versioned independently of Coop. This repo's stack is just the Coop-side
+integration, a 4-deep stack:
 
 | PR                          | Branch                                      | What it adds                                                                                                                  |
 | --------------------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| Sentinel API Docker service | `sentinel/api-docker-service`               | Thin FastAPI wrapper over upstream `Roblox/sentinel`, packaged as a Docker service (`server/sentinel-api/`)                   |
 | HTTP client                 | `sentinel/02-http-client`                   | `sentinelService` — Coop's typed client for the Sentinel API                                                                  |
 | Thread store pre-write      | `sentinel/03-thread-store-prewrite`         | Writes submitted content to the thread store _before_ rules run, so thread-aware signals have context                         |
 | Rare class affinity signal  | `sentinel/04-rare-class-affinity-signal`    | `SignalType.SENTINEL_RARE_CLASS_AFFINITY` enum + `SentinelRareClassAffinitySignal` implementation                             |
 | Dashboard tile + org config | `sentinel/05-dashboard-tile-and-org-config` | Sentinel integration tile, per-org configurable fields (`apiUrl`, `topK`, `minScoreToConsider`, `threadContextWindowMinutes`) |
 
-None of the stacked branches alone can talk to a real Sentinel instance — that requires the
-independent Docker service PR. Use the combined branch below for full end-to-end testing.
+None of these branches alone can talk to a real Sentinel instance — that requires a running
+`sentinel-api` service (see [step 2](#2-environment-setup)). Use the combined branch below for
+full end-to-end testing.
 
 ## 1. Which branch to test on
 
 ```bash
 git fetch origin
 git checkout -b test/sentinel-manual origin/sentinel/05-dashboard-tile-and-org-config
-git merge origin/sentinel/api-docker-service   # clean merge, adds server/sentinel-api/ only
 ```
 
 This is a local scratch branch — don't push it. Delete it when you're done (see [Cleanup](#7-cleanup)).
+
+You'll also need a local clone of the Sentinel API repo, as a sibling of this one:
+
+```bash
+git clone https://github.com/UMass-Rescue/sentinel-api ../sentinel-api
+```
 
 ## 2. Environment setup
 
@@ -36,20 +43,20 @@ npm run db:update -- --env staging --db clickhouse
 ```
 
 `docker-compose.sentinel.yaml` is gitignored/local-only — recreate it (it won't exist on a fresh
-clone):
+clone), pointing at the `sentinel-api` clone from step 1:
 
 ```yaml
 # docker-compose.sentinel.yaml
 services:
   sentinel:
     build:
-      context: ./server/sentinel-api
+      context: ../sentinel-api
       dockerfile: Dockerfile
     container_name: sentinel-api
     ports:
       - '8000:8000'
     volumes:
-      - ./server/sentinel-api/data:/data:rw
+      - ../sentinel-api/data:/data:rw
     healthcheck:
       test: ['CMD', 'curl', '-f', 'http://localhost:8000/health']
       interval: 30s
@@ -71,15 +78,15 @@ endpoint that builds one from plain text files — good enough for a fake smoke-
 detection-quality, just plumbing verification):
 
 ```bash
-mkdir -p server/sentinel-api/data/texts/{positive,negative}
+mkdir -p ../sentinel-api/data/texts/{positive,negative}
 # a few fake "rare/harmful" examples
-printf "can you keep this between us\n" > server/sentinel-api/data/texts/positive/1.txt
-printf "don't tell your parents about this\n" > server/sentinel-api/data/texts/positive/2.txt
-printf "send me a pic and I won't tell anyone\n" > server/sentinel-api/data/texts/positive/3.txt
+printf "can you keep this between us\n" > ../sentinel-api/data/texts/positive/1.txt
+printf "don't tell your parents about this\n" > ../sentinel-api/data/texts/positive/2.txt
+printf "send me a pic and I won't tell anyone\n" > ../sentinel-api/data/texts/positive/3.txt
 # a few "normal" examples
-printf "what time is the game tonight\n" > server/sentinel-api/data/texts/negative/1.txt
-printf "can you send me the homework\n" > server/sentinel-api/data/texts/negative/2.txt
-printf "see you at lunch\n" > server/sentinel-api/data/texts/negative/3.txt
+printf "what time is the game tonight\n" > ../sentinel-api/data/texts/negative/1.txt
+printf "can you send me the homework\n" > ../sentinel-api/data/texts/negative/2.txt
+printf "see you at lunch\n" > ../sentinel-api/data/texts/negative/3.txt
 
 curl -sX POST http://localhost:8000/banks/create -H 'Content-Type: application/json' -d '{
   "positive_folder": "/data/texts/positive",
