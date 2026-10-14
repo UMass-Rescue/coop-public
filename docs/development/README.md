@@ -5,6 +5,8 @@ Quickly get set up with Coop for the first time for local development. For testi
 > [!NOTE]
 > You may also want to familiarize yourself with Coop's [Basic Concepts](../user/concepts.md) for additional context.
 
+Deployments with additional content-access requirements can configure [content access extensions](content-access.md).
+
 This guide assumes some familiarity with the command line, e.g. using a Terminal with `bash` or `zsh`. See [Local Development](local.md) for prerequisites, configuration details, troubleshooting, and more. You may also wish to learn more about Coop's [Architecture](architecture.md).
 
 To get Coop running:
@@ -27,22 +29,19 @@ To get Coop running:
 
    ```
    0.40.4
-   Found '.nvmrc' with version <24.20.0>
-   v24.20.0 is already installed.
-   Now using node v24.20.0 (npm v11.19.0)
+   Found '.nvmrc' with version <24.21.0>
+   v24.21.0 is already installed.
+   Now using node v24.21.0 (npm v11.19.0)
    Docker version 29.4.3, build 055a478
    ```
 
    If you get an error instead, see [Prerequisites](local.md#prerequisites).
 
-2. **Install dependencies** with `npm` in the root folder and for each sub-package.
+2. **Install dependencies** for every package with one `pnpm install` from the root folder.
 
    ```sh
    # coop/
-   npm install
-   (cd db && npm install)
-   (cd server && npm install)
-   (cd client && npm install)
+   pnpm install
    ```
 
 3. **Copy example environment files** in `db/`, `server/`, and `client/`. The defaults work out of the box for local development and demoing. See [Environment Setup](local.md#environment-setup) for more details.
@@ -58,7 +57,7 @@ To get Coop running:
 
    ```sh
    # coop/
-   npm run up
+   pnpm run up
    ```
 
    Wait for PostgreSQL, ClickHouse, ScyllaDB, and Redis to be healthy before continuing; you can check progress with `docker ps`.
@@ -67,32 +66,22 @@ To get Coop running:
 
    ```sh
    # coop/
-   npm run db:create -- --env staging --db api-server-pg
-   npm run db:create -- --env staging --db scylla
-   npm run db:create -- --env staging --db clickhouse
+   pnpm run db:create --env staging --db api-server-pg
+   pnpm run db:create --env staging --db scylla
+   pnpm run db:create --env staging --db clickhouse
 
-   npm run db:update -- --env staging --db api-server-pg
-   npm run db:update -- --env staging --db scylla
-   npm run db:update -- --env staging --db clickhouse
+   pnpm run db:update --env staging --db api-server-pg
+   pnpm run db:update --env staging --db scylla
+   pnpm run db:update --env staging --db clickhouse
    ```
 
-6. **Copy static asset files** using the script in the `server/` folder:
-
-   ```sh
-   # coop/
-   cd server
-
-   # coop/server/
-   npm run copy-assets
-   ```
-
-7. **Create an organization and admin user** using the `create-org` script from the `server/` folder, providing the appropriate details.
+6. **Create an organization and admin user** using the `create-org` script from the `server/` folder, providing the appropriate details.
 
    For example:
 
    ```sh
    # coop/server/
-   npm run create-org -- \
+   pnpm run create-org \
      --name "Your Organization" \
      --website "https://example.com" \
      --email "email@example.com" \
@@ -103,7 +92,7 @@ To get Coop running:
 
    This will output your org ID and initial API key; copy them somewhere secure for safe keeping.
 
-8. Finally, **start the application**! See [Running the Application](local.md#running-the-application) for additional options, including how to start different components individually for debugging.
+7. Finally, **start the application**! See [Running the Application](local.md#running-the-application) for additional options, including how to start different components individually for debugging.
 
    Switch back to the project root folder if you're still in `server/`, then start the server and client:
 
@@ -112,7 +101,7 @@ To get Coop running:
    cd ..
 
    # coop/
-   npm run start
+   pnpm run start
    ```
 
    Log in at [localhost:3000](http://localhost:3000) using the credentials you provided when running `create-org`. The initial page load may take a moment.

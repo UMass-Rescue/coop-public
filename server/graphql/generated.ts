@@ -30,7 +30,6 @@ import type {
   ContentAppealReviewJobPayload,
   ContentManualReviewJobPayload,
   ManualReviewJobOrAppeal,
-  ManualReviewJobPayload,
   ManualReviewQueue,
   NcmecManualReviewJobPayload,
   ThreadAppealReviewJobPayload,
@@ -61,7 +60,10 @@ import type { Signal } from '../services/signalsService/index.js';
 import type { NonEmptyString } from '../utils/typescript-types.js';
 import type { LocationBankWithoutFullPlacesAPIResponse } from './datasources/LocationBankApi.js';
 import type { Context } from './resolvers.js';
-import type { ItemSubmissionForGQL } from './types.js';
+import type {
+  ItemSubmissionForGQL,
+  ManualReviewJobPayloadForGQL,
+} from './types.js';
 
 export type Maybe<T> =
   T extends Promise<infer U> ? Promise<U | null> : T | null;
@@ -858,7 +860,9 @@ export type GQLCreateManualReviewQueueInput = {
   readonly description?: InputMaybe<Scalars['String']['input']>;
   readonly hiddenActionIds: ReadonlyArray<Scalars['ID']['input']>;
   readonly isAppealsQueue: Scalars['Boolean']['input'];
+  readonly jobSortType?: InputMaybe<GQLJobSortType>;
   readonly name: Scalars['String']['input'];
+  readonly roleIds: ReadonlyArray<Scalars['ID']['input']>;
   readonly userIds: ReadonlyArray<Scalars['ID']['input']>;
 };
 
@@ -1232,6 +1236,7 @@ export type GQLError = {
 
 export type GQLExchangeApiInfo = {
   readonly __typename?: 'ExchangeApiInfo';
+  /** @deprecated Field no longer supported */
   readonly has_auth: Scalars['Boolean']['output'];
   readonly name: Scalars['String']['output'];
   readonly supports_auth: Scalars['Boolean']['output'];
@@ -1247,6 +1252,12 @@ export type GQLExchangeConfigInput = {
   readonly api_name: Scalars['String']['input'];
   readonly config_json: Scalars['String']['input'];
   readonly credentials_json?: InputMaybe<Scalars['String']['input']>;
+};
+
+export type GQLExchangeCredentialStatus = {
+  readonly __typename?: 'ExchangeCredentialStatus';
+  readonly has_credentials: Scalars['Boolean']['output'];
+  readonly has_own_credentials: Scalars['Boolean']['output'];
 };
 
 export type GQLExchangeFieldDescriptor = {
@@ -1266,6 +1277,7 @@ export type GQLExchangeInfo = {
   readonly error?: Maybe<Scalars['String']['output']>;
   readonly fetched_items?: Maybe<Scalars['Int']['output']>;
   readonly has_auth: Scalars['Boolean']['output'];
+  readonly has_own_credentials: Scalars['Boolean']['output'];
   readonly is_fetching?: Maybe<Scalars['Boolean']['output']>;
   readonly last_fetch_succeeded?: Maybe<Scalars['Boolean']['output']>;
   readonly last_fetch_time?: Maybe<Scalars['String']['output']>;
@@ -1662,6 +1674,12 @@ export type GQLItemAction = {
   readonly itemId: Scalars['ID']['output'];
   readonly itemTypeId: Scalars['ID']['output'];
   readonly jobId?: Maybe<Scalars['ID']['output']>;
+  /**
+   * Moderator-supplied parameter values this action ran with, keyed by the
+   * parameter's `name`. Empty when the action takes no parameters or the
+   * execution predates parameter capture.
+   */
+  readonly parameters: Scalars['JSONObject']['output'];
   readonly policies: ReadonlyArray<Scalars['String']['output']>;
   readonly ruleIds: ReadonlyArray<Scalars['ID']['output']>;
   readonly ts: Scalars['DateTime']['output'];
@@ -1848,6 +1866,32 @@ export type GQLJobHasAlreadyBeenSubmittedError = GQLError & {
   readonly type: ReadonlyArray<Scalars['String']['output']>;
 };
 
+export const GQLJobPriorityProperty = {
+  NumReports: 'numReports',
+  UserScore: 'userScore',
+} as const;
+
+export type GQLJobPriorityProperty =
+  (typeof GQLJobPriorityProperty)[keyof typeof GQLJobPriorityProperty];
+export type GQLJobPriorityWeight = {
+  readonly __typename?: 'JobPriorityWeight';
+  readonly property: GQLJobPriorityProperty;
+  readonly weight: Scalars['Float']['output'];
+};
+
+export type GQLJobPriorityWeightInput = {
+  readonly property: GQLJobPriorityProperty;
+  readonly weight: Scalars['Float']['input'];
+};
+
+export const GQLJobSortType = {
+  Fifo: 'FIFO',
+  NumReports: 'NUM_REPORTS',
+  Weighted: 'WEIGHTED',
+} as const;
+
+export type GQLJobSortType =
+  (typeof GQLJobSortType)[keyof typeof GQLJobSortType];
 export const GQLLanguage = {
   Abkhazian: 'ABKHAZIAN',
   Afar: 'AFAR',
@@ -2305,6 +2349,8 @@ export type GQLManualReviewJobWithDecisions = {
 
 export type GQLManualReviewQueue = {
   readonly __typename?: 'ManualReviewQueue';
+  /** Roles whose members can review this queue, in addition to explicitly assigned reviewers. */
+  readonly assignedRoleIds: ReadonlyArray<Scalars['ID']['output']>;
   readonly autoCloseJobs: Scalars['Boolean']['output'];
   readonly clearReportsDisposition?: Maybe<GQLMrtClearReportsDisposition>;
   readonly clearReportsScope: GQLMrtClearReportsScope;
@@ -2315,6 +2361,7 @@ export type GQLManualReviewQueue = {
   readonly id: Scalars['ID']['output'];
   readonly isAppealsQueue: Scalars['Boolean']['output'];
   readonly isDefaultQueue: Scalars['Boolean']['output'];
+  readonly jobSortType: GQLJobSortType;
   readonly jobs: ReadonlyArray<GQLManualReviewJob>;
   readonly name: Scalars['String']['output'];
   readonly oldestJobCreatedAt?: Maybe<Scalars['DateTime']['output']>;
@@ -2325,6 +2372,7 @@ export type GQLManualReviewQueue = {
 export type GQLManualReviewQueueJobsArgs = {
   ids?: InputMaybe<ReadonlyArray<Scalars['ID']['input']>>;
   limit?: InputMaybe<Scalars['Int']['input']>;
+  lockToken?: InputMaybe<Scalars['String']['input']>;
 };
 
 export type GQLManualReviewQueueNameExistsError = GQLError & {
@@ -2618,6 +2666,7 @@ export type GQLMutation = {
   readonly sendPasswordReset: Scalars['Boolean']['output'];
   readonly setAllUserStrikeThresholds: GQLSetAllUserStrikeThresholdsSuccessResponse;
   readonly setIntegrationConfig: GQLSetIntegrationConfigResponse;
+  readonly setJobPriorityWeights: GQLSetJobPriorityWeightsResponse;
   readonly setModeratorSafetySettings?: Maybe<GQLSetModeratorSafetySettingsSuccessResponse>;
   readonly setMrtChartConfigurationSettings?: Maybe<GQLSetMrtChartConfigurationSettingsSuccessResponse>;
   readonly setOrgDefaultSafetySettings?: Maybe<GQLSetModeratorSafetySettingsSuccessResponse>;
@@ -2630,10 +2679,12 @@ export type GQLMutation = {
   readonly updateAppealSettings: GQLAppealSettings;
   readonly updateContentItemType: GQLMutateContentItemTypeResponse;
   readonly updateContentRule: GQLUpdateContentRuleResponse;
+  /** @deprecated Field no longer supported */
   readonly updateExchangeCredentials: Scalars['Boolean']['output'];
   readonly updateHasAppealsEnabled: Scalars['Boolean']['output'];
   readonly updateHasReportingRulesEnabled: Scalars['Boolean']['output'];
   readonly updateHashBank: GQLMutateHashBankResponse;
+  readonly updateHashBankExchangeCredentials: GQLExchangeCredentialStatus;
   readonly updateHideSkipButtonForNonAdmins: Scalars['Boolean']['output'];
   readonly updateIgnoreCallbackUrl: Scalars['Boolean']['output'];
   readonly updateLocationBank: GQLMutateLocationBankResponse;
@@ -2879,6 +2930,10 @@ export type GQLMutationSetIntegrationConfigArgs = {
   input: GQLSetIntegrationConfigInput;
 };
 
+export type GQLMutationSetJobPriorityWeightsArgs = {
+  input: GQLSetJobPriorityWeightsInput;
+};
+
 export type GQLMutationSetModeratorSafetySettingsArgs = {
   moderatorSafetySettings: GQLModeratorSafetySettingsInput;
 };
@@ -2943,6 +2998,11 @@ export type GQLMutationUpdateHasReportingRulesEnabledArgs = {
 
 export type GQLMutationUpdateHashBankArgs = {
   input: GQLUpdateHashBankInput;
+};
+
+export type GQLMutationUpdateHashBankExchangeCredentialsArgs = {
+  bankId: Scalars['ID']['input'];
+  credentialsJson: Scalars['String']['input'];
 };
 
 export type GQLMutationUpdateHideSkipButtonForNonAdminsArgs = {
@@ -3101,6 +3161,16 @@ export type GQLNcmecContentItem = {
   readonly contentItem: GQLItem;
   readonly isConfirmedCSAM: Scalars['Boolean']['output'];
   readonly isReported: Scalars['Boolean']['output'];
+};
+
+export type GQLNcmecEscalationUnavailableError = GQLError & {
+  readonly __typename?: 'NcmecEscalationUnavailableError';
+  readonly detail?: Maybe<Scalars['String']['output']>;
+  readonly pointer?: Maybe<Scalars['String']['output']>;
+  readonly requestId?: Maybe<Scalars['String']['output']>;
+  readonly status: Scalars['Int']['output'];
+  readonly title: Scalars['String']['output'];
+  readonly type: ReadonlyArray<Scalars['String']['output']>;
 };
 
 /**
@@ -3329,6 +3399,7 @@ export type GQLOrg = {
   readonly integrationConfigs: ReadonlyArray<GQLIntegrationConfig>;
   readonly isDemoOrg: Scalars['Boolean']['output'];
   readonly itemTypes: ReadonlyArray<GQLItemType>;
+  readonly jobPriorityWeights: ReadonlyArray<GQLJobPriorityWeight>;
   readonly mrtQueues: ReadonlyArray<GQLManualReviewQueue>;
   readonly name: Scalars['String']['output'];
   /**
@@ -4115,10 +4186,8 @@ export type GQLRole = {
   readonly __typename?: 'Role';
   readonly description?: Maybe<Scalars['String']['output']>;
   readonly displayName: Scalars['String']['output'];
-  /** Persisted public.roles.id, or null when the row is materialized lazily on first save. */
-  readonly id?: Maybe<Scalars['ID']['output']>;
-  /** True when permissions/metadata come from the static fallback rather than public.roles. */
-  readonly isFallback: Scalars['Boolean']['output'];
+  /** Persisted public.roles.id. */
+  readonly id: Scalars['ID']['output'];
   readonly isSystem: Scalars['Boolean']['output'];
   /** Stable role identifier (matches UserRole). */
   readonly key: GQLUserRole;
@@ -4400,6 +4469,18 @@ export type GQLSetIntegrationConfigSuccessResponse = {
   readonly config: GQLIntegrationConfig;
 };
 
+export type GQLSetJobPriorityWeightsInput = {
+  readonly weights: ReadonlyArray<GQLJobPriorityWeightInput>;
+};
+
+export type GQLSetJobPriorityWeightsResponse =
+  GQLSetJobPriorityWeightsSuccessResponse;
+
+export type GQLSetJobPriorityWeightsSuccessResponse = {
+  readonly __typename?: 'SetJobPriorityWeightsSuccessResponse';
+  readonly _?: Maybe<Scalars['Boolean']['output']>;
+};
+
 export type GQLSetModeratorSafetySettingsSuccessResponse = {
   readonly __typename?: 'SetModeratorSafetySettingsSuccessResponse';
   readonly _?: Maybe<Scalars['Boolean']['output']>;
@@ -4654,6 +4735,7 @@ export type GQLSubmitDecisionResponse =
   | GQLJobHasAlreadyBeenSubmittedError
   | GQLMissingRequiredDecisionReasonError
   | GQLMissingRequiredPolicyForDecisionError
+  | GQLNcmecEscalationUnavailableError
   | GQLNoJobWithIdInQueueError
   | GQLRecordingJobDecisionFailedError
   | GQLSubmitDecisionSuccessResponse
@@ -4915,7 +4997,9 @@ export type GQLUpdateManualReviewQueueInput = {
   >;
   readonly description?: InputMaybe<Scalars['String']['input']>;
   readonly id: Scalars['ID']['input'];
+  readonly jobSortType?: InputMaybe<GQLJobSortType>;
   readonly name?: InputMaybe<Scalars['String']['input']>;
+  readonly roleIds: ReadonlyArray<Scalars['ID']['input']>;
   readonly userIds: ReadonlyArray<Scalars['ID']['input']>;
 };
 
@@ -5086,7 +5170,6 @@ export type GQLUser = {
   readonly notifications: GQLUserNotifications;
   readonly orgId: Scalars['ID']['output'];
   readonly permissions: ReadonlyArray<GQLUserPermission>;
-  readonly readMeJWT?: Maybe<Scalars['String']['output']>;
   readonly rejectedByAdmin?: Maybe<Scalars['Boolean']['output']>;
   readonly reviewableQueues: ReadonlyArray<GQLManualReviewQueue>;
   readonly role?: Maybe<GQLUserRole>;
@@ -5357,11 +5440,13 @@ export type GQLZentropiLabelerVersion = {
   readonly __typename?: 'ZentropiLabelerVersion';
   readonly id: Scalars['String']['output'];
   readonly label: Scalars['String']['output'];
+  readonly labelerId?: Maybe<Scalars['String']['output']>;
 };
 
 export type GQLZentropiLabelerVersionInput = {
   readonly id: Scalars['String']['input'];
   readonly label: Scalars['String']['input'];
+  readonly labelerId?: InputMaybe<Scalars['String']['input']>;
 };
 
 export type ResolverTypeWrapper<T> = Promise<T> | T;
@@ -5668,6 +5753,7 @@ export type GQLResolversUnionTypes<_RefType extends Record<string, unknown>> = {
     | (Omit<GQLSetIntegrationConfigSuccessResponse, 'config'> & {
         config: _RefType['IntegrationConfig'];
       });
+  SetJobPriorityWeightsResponse: GQLSetJobPriorityWeightsSuccessResponse;
   SignUpResponse:
     | (Omit<GQLSignUpSuccessResponse, 'data'> & {
         data?: Maybe<_RefType['User']>;
@@ -5681,6 +5767,7 @@ export type GQLResolversUnionTypes<_RefType extends Record<string, unknown>> = {
     | GQLJobHasAlreadyBeenSubmittedError
     | GQLMissingRequiredDecisionReasonError
     | GQLMissingRequiredPolicyForDecisionError
+    | GQLNcmecEscalationUnavailableError
     | GQLNoJobWithIdInQueueError
     | GQLRecordingJobDecisionFailedError
     | GQLSubmitDecisionSuccessResponse
@@ -5754,6 +5841,7 @@ export type GQLResolversInterfaceTypes<
     | GQLMatchingBankNameExistsError
     | GQLMissingRequiredDecisionReasonError
     | GQLMissingRequiredPolicyForDecisionError
+    | GQLNcmecEscalationUnavailableError
     | GQLNoJobWithIdInQueueError
     | GQLNotFoundError
     | GQLPartialItemsEndpointResponseError
@@ -6011,6 +6099,7 @@ export type GQLResolversTypes = {
   ExchangeApiInfo: ResolverTypeWrapper<GQLExchangeApiInfo>;
   ExchangeApiSchema: ResolverTypeWrapper<GQLExchangeApiSchema>;
   ExchangeConfigInput: GQLExchangeConfigInput;
+  ExchangeCredentialStatus: ResolverTypeWrapper<GQLExchangeCredentialStatus>;
   ExchangeFieldDescriptor: ResolverTypeWrapper<GQLExchangeFieldDescriptor>;
   ExchangeInfo: ResolverTypeWrapper<GQLExchangeInfo>;
   ExchangeSchemaSection: ResolverTypeWrapper<GQLExchangeSchemaSection>;
@@ -6135,6 +6224,10 @@ export type GQLResolversTypes = {
   JobCreationSettingsInput: GQLJobCreationSettingsInput;
   JobCreationSourceOptions: GQLJobCreationSourceOptions;
   JobHasAlreadyBeenSubmittedError: ResolverTypeWrapper<GQLJobHasAlreadyBeenSubmittedError>;
+  JobPriorityProperty: GQLJobPriorityProperty;
+  JobPriorityWeight: ResolverTypeWrapper<GQLJobPriorityWeight>;
+  JobPriorityWeightInput: GQLJobPriorityWeightInput;
+  JobSortType: GQLJobSortType;
   Language: GQLLanguage;
   Languages: ResolverTypeWrapper<GQLLanguages>;
   LatLng: ResolverTypeWrapper<GQLLatLng>;
@@ -6194,7 +6287,7 @@ export type GQLResolversTypes = {
     GQLResolversUnionTypes<GQLResolversTypes>['ManualReviewJobEnqueueSourceInfo']
   >;
   ManualReviewJobKind: GQLManualReviewJobKind;
-  ManualReviewJobPayload: ResolverTypeWrapper<ManualReviewJobPayload>;
+  ManualReviewJobPayload: ResolverTypeWrapper<ManualReviewJobPayloadForGQL>;
   ManualReviewJobWithDecisions: ResolverTypeWrapper<
     Omit<GQLManualReviewJobWithDecisions, 'decision' | 'job'> & {
       decision: GQLResolversTypes['ManualReviewDecision'];
@@ -6319,6 +6412,7 @@ export type GQLResolversTypes = {
       contentItem: GQLResolversTypes['Item'];
     }
   >;
+  NcmecEscalationUnavailableError: ResolverTypeWrapper<GQLNcmecEscalationUnavailableError>;
   NcmecFailedSubmission: ResolverTypeWrapper<
     Omit<GQLNcmecFailedSubmission, 'userItemType'> & {
       userItemType: GQLResolversTypes['UserItemType'];
@@ -6496,6 +6590,11 @@ export type GQLResolversTypes = {
       config: GQLResolversTypes['IntegrationConfig'];
     }
   >;
+  SetJobPriorityWeightsInput: GQLSetJobPriorityWeightsInput;
+  SetJobPriorityWeightsResponse: ResolverTypeWrapper<
+    GQLResolversUnionTypes<GQLResolversTypes>['SetJobPriorityWeightsResponse']
+  >;
+  SetJobPriorityWeightsSuccessResponse: ResolverTypeWrapper<GQLSetJobPriorityWeightsSuccessResponse>;
   SetModeratorSafetySettingsSuccessResponse: ResolverTypeWrapper<GQLSetModeratorSafetySettingsSuccessResponse>;
   SetMrtChartConfigurationSettingsSuccessResponse: ResolverTypeWrapper<GQLSetMrtChartConfigurationSettingsSuccessResponse>;
   SetPluginIntegrationConfigInput: GQLSetPluginIntegrationConfigInput;
@@ -6820,6 +6919,7 @@ export type GQLResolversParentTypes = {
   ExchangeApiInfo: GQLExchangeApiInfo;
   ExchangeApiSchema: GQLExchangeApiSchema;
   ExchangeConfigInput: GQLExchangeConfigInput;
+  ExchangeCredentialStatus: GQLExchangeCredentialStatus;
   ExchangeFieldDescriptor: GQLExchangeFieldDescriptor;
   ExchangeInfo: GQLExchangeInfo;
   ExchangeSchemaSection: GQLExchangeSchemaSection;
@@ -6909,6 +7009,8 @@ export type GQLResolversParentTypes = {
   JobCreationFilterByInput: GQLJobCreationFilterByInput;
   JobCreationSettingsInput: GQLJobCreationSettingsInput;
   JobHasAlreadyBeenSubmittedError: GQLJobHasAlreadyBeenSubmittedError;
+  JobPriorityWeight: GQLJobPriorityWeight;
+  JobPriorityWeightInput: GQLJobPriorityWeightInput;
   Languages: GQLLanguages;
   LatLng: GQLLatLng;
   LatLngInput: GQLLatLngInput;
@@ -6951,7 +7053,7 @@ export type GQLResolversParentTypes = {
   ManualReviewJob: ManualReviewJobOrAppeal;
   ManualReviewJobComment: ManualReviewJobComment;
   ManualReviewJobEnqueueSourceInfo: GQLResolversUnionTypes<GQLResolversParentTypes>['ManualReviewJobEnqueueSourceInfo'];
-  ManualReviewJobPayload: ManualReviewJobPayload;
+  ManualReviewJobPayload: ManualReviewJobPayloadForGQL;
   ManualReviewJobWithDecisions: Omit<
     GQLManualReviewJobWithDecisions,
     'decision' | 'job'
@@ -7041,6 +7143,7 @@ export type GQLResolversParentTypes = {
   NcmecContentItem: Omit<GQLNcmecContentItem, 'contentItem'> & {
     contentItem: GQLResolversParentTypes['Item'];
   };
+  NcmecEscalationUnavailableError: GQLNcmecEscalationUnavailableError;
   NcmecFailedSubmission: Omit<GQLNcmecFailedSubmission, 'userItemType'> & {
     userItemType: GQLResolversParentTypes['UserItemType'];
   };
@@ -7183,6 +7286,9 @@ export type GQLResolversParentTypes = {
     GQLSetIntegrationConfigSuccessResponse,
     'config'
   > & { config: GQLResolversParentTypes['IntegrationConfig'] };
+  SetJobPriorityWeightsInput: GQLSetJobPriorityWeightsInput;
+  SetJobPriorityWeightsResponse: GQLResolversUnionTypes<GQLResolversParentTypes>['SetJobPriorityWeightsResponse'];
+  SetJobPriorityWeightsSuccessResponse: GQLSetJobPriorityWeightsSuccessResponse;
   SetModeratorSafetySettingsSuccessResponse: GQLSetModeratorSafetySettingsSuccessResponse;
   SetMrtChartConfigurationSettingsSuccessResponse: GQLSetMrtChartConfigurationSettingsSuccessResponse;
   SetPluginIntegrationConfigInput: GQLSetPluginIntegrationConfigInput;
@@ -9021,6 +9127,7 @@ export type GQLErrorResolvers<
     | 'MatchingBankNameExistsError'
     | 'MissingRequiredDecisionReasonError'
     | 'MissingRequiredPolicyForDecisionError'
+    | 'NcmecEscalationUnavailableError'
     | 'NoJobWithIdInQueueError'
     | 'NotFoundError'
     | 'PartialItemsEndpointResponseError'
@@ -9073,6 +9180,23 @@ export type GQLExchangeApiSchemaResolvers<
   >;
 };
 
+export type GQLExchangeCredentialStatusResolvers<
+  ContextType = Context,
+  ParentType extends GQLResolversParentTypes['ExchangeCredentialStatus'] =
+    GQLResolversParentTypes['ExchangeCredentialStatus'],
+> = {
+  has_credentials?: Resolver<
+    GQLResolversTypes['Boolean'],
+    ParentType,
+    ContextType
+  >;
+  has_own_credentials?: Resolver<
+    GQLResolversTypes['Boolean'],
+    ParentType,
+    ContextType
+  >;
+};
+
 export type GQLExchangeFieldDescriptorResolvers<
   ContextType = Context,
   ParentType extends GQLResolversParentTypes['ExchangeFieldDescriptor'] =
@@ -9104,6 +9228,11 @@ export type GQLExchangeInfoResolvers<
     ContextType
   >;
   has_auth?: Resolver<GQLResolversTypes['Boolean'], ParentType, ContextType>;
+  has_own_credentials?: Resolver<
+    GQLResolversTypes['Boolean'],
+    ParentType,
+    ContextType
+  >;
   is_fetching?: Resolver<
     Maybe<GQLResolversTypes['Boolean']>,
     ParentType,
@@ -9710,6 +9839,11 @@ export type GQLItemActionResolvers<
   itemId?: Resolver<GQLResolversTypes['ID'], ParentType, ContextType>;
   itemTypeId?: Resolver<GQLResolversTypes['ID'], ParentType, ContextType>;
   jobId?: Resolver<Maybe<GQLResolversTypes['ID']>, ParentType, ContextType>;
+  parameters?: Resolver<
+    GQLResolversTypes['JSONObject'],
+    ParentType,
+    ContextType
+  >;
   policies?: Resolver<
     ReadonlyArray<GQLResolversTypes['String']>,
     ParentType,
@@ -9998,6 +10132,19 @@ export type GQLJobHasAlreadyBeenSubmittedErrorResolvers<
     ContextType
   >;
   __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
+};
+
+export type GQLJobPriorityWeightResolvers<
+  ContextType = Context,
+  ParentType extends GQLResolversParentTypes['JobPriorityWeight'] =
+    GQLResolversParentTypes['JobPriorityWeight'],
+> = {
+  property?: Resolver<
+    GQLResolversTypes['JobPriorityProperty'],
+    ParentType,
+    ContextType
+  >;
+  weight?: Resolver<GQLResolversTypes['Float'], ParentType, ContextType>;
 };
 
 export type GQLLanguagesResolvers<
@@ -10491,6 +10638,11 @@ export type GQLManualReviewQueueResolvers<
   ParentType extends GQLResolversParentTypes['ManualReviewQueue'] =
     GQLResolversParentTypes['ManualReviewQueue'],
 > = {
+  assignedRoleIds?: Resolver<
+    ReadonlyArray<GQLResolversTypes['ID']>,
+    ParentType,
+    ContextType
+  >;
   autoCloseJobs?: Resolver<
     GQLResolversTypes['Boolean'],
     ParentType,
@@ -10534,6 +10686,11 @@ export type GQLManualReviewQueueResolvers<
   >;
   isDefaultQueue?: Resolver<
     GQLResolversTypes['Boolean'],
+    ParentType,
+    ContextType
+  >;
+  jobSortType?: Resolver<
+    GQLResolversTypes['JobSortType'],
     ParentType,
     ContextType
   >;
@@ -11393,6 +11550,12 @@ export type GQLMutationResolvers<
     ContextType,
     RequireFields<GQLMutationSetIntegrationConfigArgs, 'input'>
   >;
+  setJobPriorityWeights?: Resolver<
+    GQLResolversTypes['SetJobPriorityWeightsResponse'],
+    ParentType,
+    ContextType,
+    RequireFields<GQLMutationSetJobPriorityWeightsArgs, 'input'>
+  >;
   setModeratorSafetySettings?: Resolver<
     Maybe<GQLResolversTypes['SetModeratorSafetySettingsSuccessResponse']>,
     ParentType,
@@ -11503,6 +11666,15 @@ export type GQLMutationResolvers<
     ParentType,
     ContextType,
     RequireFields<GQLMutationUpdateHashBankArgs, 'input'>
+  >;
+  updateHashBankExchangeCredentials?: Resolver<
+    GQLResolversTypes['ExchangeCredentialStatus'],
+    ParentType,
+    ContextType,
+    RequireFields<
+      GQLMutationUpdateHashBankExchangeCredentialsArgs,
+      'bankId' | 'credentialsJson'
+    >
   >;
   updateHideSkipButtonForNonAdmins?: Resolver<
     GQLResolversTypes['Boolean'],
@@ -11729,6 +11901,37 @@ export type GQLNcmecContentItemResolvers<
     ContextType
   >;
   isReported?: Resolver<GQLResolversTypes['Boolean'], ParentType, ContextType>;
+};
+
+export type GQLNcmecEscalationUnavailableErrorResolvers<
+  ContextType = Context,
+  ParentType extends
+    GQLResolversParentTypes['NcmecEscalationUnavailableError'] =
+    GQLResolversParentTypes['NcmecEscalationUnavailableError'],
+> = {
+  detail?: Resolver<
+    Maybe<GQLResolversTypes['String']>,
+    ParentType,
+    ContextType
+  >;
+  pointer?: Resolver<
+    Maybe<GQLResolversTypes['String']>,
+    ParentType,
+    ContextType
+  >;
+  requestId?: Resolver<
+    Maybe<GQLResolversTypes['String']>,
+    ParentType,
+    ContextType
+  >;
+  status?: Resolver<GQLResolversTypes['Int'], ParentType, ContextType>;
+  title?: Resolver<GQLResolversTypes['String'], ParentType, ContextType>;
+  type?: Resolver<
+    ReadonlyArray<GQLResolversTypes['String']>,
+    ParentType,
+    ContextType
+  >;
+  __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
 };
 
 export type GQLNcmecFailedSubmissionResolvers<
@@ -12077,6 +12280,11 @@ export type GQLOrgResolvers<
   isDemoOrg?: Resolver<GQLResolversTypes['Boolean'], ParentType, ContextType>;
   itemTypes?: Resolver<
     ReadonlyArray<GQLResolversTypes['ItemType']>,
+    ParentType,
+    ContextType
+  >;
+  jobPriorityWeights?: Resolver<
+    ReadonlyArray<GQLResolversTypes['JobPriorityWeight']>,
     ParentType,
     ContextType
   >;
@@ -13364,8 +13572,7 @@ export type GQLRoleResolvers<
     ContextType
   >;
   displayName?: Resolver<GQLResolversTypes['String'], ParentType, ContextType>;
-  id?: Resolver<Maybe<GQLResolversTypes['ID']>, ParentType, ContextType>;
-  isFallback?: Resolver<GQLResolversTypes['Boolean'], ParentType, ContextType>;
+  id?: Resolver<GQLResolversTypes['ID'], ParentType, ContextType>;
   isSystem?: Resolver<GQLResolversTypes['Boolean'], ParentType, ContextType>;
   key?: Resolver<GQLResolversTypes['UserRole'], ParentType, ContextType>;
   permissions?: Resolver<
@@ -13850,6 +14057,28 @@ export type GQLSetIntegrationConfigSuccessResponseResolvers<
   __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
 };
 
+export type GQLSetJobPriorityWeightsResponseResolvers<
+  ContextType = Context,
+  ParentType extends GQLResolversParentTypes['SetJobPriorityWeightsResponse'] =
+    GQLResolversParentTypes['SetJobPriorityWeightsResponse'],
+> = {
+  __resolveType: TypeResolveFn<
+    'SetJobPriorityWeightsSuccessResponse',
+    ParentType,
+    ContextType
+  >;
+};
+
+export type GQLSetJobPriorityWeightsSuccessResponseResolvers<
+  ContextType = Context,
+  ParentType extends
+    GQLResolversParentTypes['SetJobPriorityWeightsSuccessResponse'] =
+    GQLResolversParentTypes['SetJobPriorityWeightsSuccessResponse'],
+> = {
+  _?: Resolver<Maybe<GQLResolversTypes['Boolean']>, ParentType, ContextType>;
+  __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
+};
+
 export type GQLSetModeratorSafetySettingsSuccessResponseResolvers<
   ContextType = Context,
   ParentType extends
@@ -14145,6 +14374,7 @@ export type GQLSubmitDecisionResponseResolvers<
     | 'JobHasAlreadyBeenSubmittedError'
     | 'MissingRequiredDecisionReasonError'
     | 'MissingRequiredPolicyForDecisionError'
+    | 'NcmecEscalationUnavailableError'
     | 'NoJobWithIdInQueueError'
     | 'RecordingJobDecisionFailedError'
     | 'SubmitDecisionSuccessResponse'
@@ -14675,11 +14905,6 @@ export type GQLUserResolvers<
     ParentType,
     ContextType
   >;
-  readMeJWT?: Resolver<
-    Maybe<GQLResolversTypes['String']>,
-    ParentType,
-    ContextType
-  >;
   rejectedByAdmin?: Resolver<
     Maybe<GQLResolversTypes['Boolean']>,
     ParentType,
@@ -15183,6 +15408,11 @@ export type GQLZentropiLabelerVersionResolvers<
 > = {
   id?: Resolver<GQLResolversTypes['String'], ParentType, ContextType>;
   label?: Resolver<GQLResolversTypes['String'], ParentType, ContextType>;
+  labelerId?: Resolver<
+    Maybe<GQLResolversTypes['String']>,
+    ParentType,
+    ContextType
+  >;
 };
 
 export type GQLResolvers<ContextType = Context> = {
@@ -15272,6 +15502,7 @@ export type GQLResolvers<ContextType = Context> = {
   Error?: GQLErrorResolvers<ContextType>;
   ExchangeApiInfo?: GQLExchangeApiInfoResolvers<ContextType>;
   ExchangeApiSchema?: GQLExchangeApiSchemaResolvers<ContextType>;
+  ExchangeCredentialStatus?: GQLExchangeCredentialStatusResolvers<ContextType>;
   ExchangeFieldDescriptor?: GQLExchangeFieldDescriptorResolvers<ContextType>;
   ExchangeInfo?: GQLExchangeInfoResolvers<ContextType>;
   ExchangeSchemaSection?: GQLExchangeSchemaSectionResolvers<ContextType>;
@@ -15322,6 +15553,7 @@ export type GQLResolvers<ContextType = Context> = {
   JobCreationCount?: GQLJobCreationCountResolvers<ContextType>;
   JobCreationFilterBy?: GQLJobCreationFilterByResolvers<ContextType>;
   JobHasAlreadyBeenSubmittedError?: GQLJobHasAlreadyBeenSubmittedErrorResolvers<ContextType>;
+  JobPriorityWeight?: GQLJobPriorityWeightResolvers<ContextType>;
   Languages?: GQLLanguagesResolvers<ContextType>;
   LatLng?: GQLLatLngResolvers<ContextType>;
   LeafCondition?: GQLLeafConditionResolvers<ContextType>;
@@ -15384,6 +15616,7 @@ export type GQLResolvers<ContextType = Context> = {
   NCMECReportedThread?: GQLNcmecReportedThreadResolvers<ContextType>;
   NcmecAdditionalFile?: GQLNcmecAdditionalFileResolvers<ContextType>;
   NcmecContentItem?: GQLNcmecContentItemResolvers<ContextType>;
+  NcmecEscalationUnavailableError?: GQLNcmecEscalationUnavailableErrorResolvers<ContextType>;
   NcmecFailedSubmission?: GQLNcmecFailedSubmissionResolvers<ContextType>;
   NcmecManualReviewJobPayload?: GQLNcmecManualReviewJobPayloadResolvers<ContextType>;
   NcmecOrgSettings?: GQLNcmecOrgSettingsResolvers<ContextType>;
@@ -15460,6 +15693,8 @@ export type GQLResolvers<ContextType = Context> = {
   SetAllUserStrikeThresholdsSuccessResponse?: GQLSetAllUserStrikeThresholdsSuccessResponseResolvers<ContextType>;
   SetIntegrationConfigResponse?: GQLSetIntegrationConfigResponseResolvers<ContextType>;
   SetIntegrationConfigSuccessResponse?: GQLSetIntegrationConfigSuccessResponseResolvers<ContextType>;
+  SetJobPriorityWeightsResponse?: GQLSetJobPriorityWeightsResponseResolvers<ContextType>;
+  SetJobPriorityWeightsSuccessResponse?: GQLSetJobPriorityWeightsSuccessResponseResolvers<ContextType>;
   SetModeratorSafetySettingsSuccessResponse?: GQLSetModeratorSafetySettingsSuccessResponseResolvers<ContextType>;
   SetMrtChartConfigurationSettingsSuccessResponse?: GQLSetMrtChartConfigurationSettingsSuccessResponseResolvers<ContextType>;
   SignUpResponse?: GQLSignUpResponseResolvers<ContextType>;
