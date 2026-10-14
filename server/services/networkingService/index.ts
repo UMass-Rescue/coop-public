@@ -9,7 +9,7 @@ import { Agent, fetch, type FormData, type Headers } from 'undici';
 import { xml2json } from 'xml-js';
 
 import { b64EncodeArrayBuffer, jsonStringify } from '../../utils/encoding.js';
-import { JSON } from '../../utils/json-schema-types.js';
+import type { JSON } from '../../utils/json-schema-types.js';
 import { assertUnreachable } from '../../utils/misc.js';
 import type SafeTracer from '../../utils/SafeTracer.js';
 import { MINUTE_MS } from '../../utils/time.js';
@@ -221,7 +221,7 @@ export async function fetchHTTP<T extends HandleResponseBody>(
                   // necessarily just call toString, won't get accidentally
                   // handled incorrectly
                   (castBody satisfies string | URLSearchParams).toString(),
-                );
+                ).buffer;
 
           const { signature } = await query.signWith(bodyBuffer);
           return b64EncodeArrayBuffer(signature);
