@@ -36,6 +36,24 @@ export interface LookupResponse {
   [bankName: string]: BankMatch[] | undefined;
 }
 
+// Signal types computed by the optional CLIP HMA instance (CLIP_HMA_SERVICE_URL).
+// Every other signal type belongs to the default instance (HMA_SERVICE_URL).
+const CLIP_SIGNAL_TYPES: ReadonlySet<string> = new Set(['clip_float']);
+
+export function isClipSignalType(signalType: string): boolean {
+  return CLIP_SIGNAL_TYPES.has(signalType);
+}
+
+// HMA reports distances as strings. Blank or non-numeric ones must not pass,
+// which a bare Number() would allow ('' and null both become 0).
+function isDistanceWithin(distance: unknown, maxDistance: number): boolean {
+  if (typeof distance !== 'string' || distance.trim() === '') {
+    return false;
+  }
+  const value = Number(distance);
+  return Number.isFinite(value) && value <= maxDistance;
+}
+
 export interface ExchangeFieldDescriptor {
   name: string;
   type: string;
@@ -252,6 +270,8 @@ function validateExchangeCredentials(
 
 export class HmaService {
   private readonly hmaServiceUrl: string;
+  // Unset unless the optional CLIP HMA instance is deployed.
+  private readonly clipServiceUrl: string | undefined;
   private readonly hashBankService: HashBankService;
 
   constructor(
@@ -261,6 +281,11 @@ export class HmaService {
   ) {
     this.hmaServiceUrl =
       process.env.HMA_SERVICE_URL ?? 'http://localhost:9876/';
+    const clipUrl = process.env.CLIP_HMA_SERVICE_URL?.trim().replace(
+      /\/+$/,
+      '',
+    );
+    this.clipServiceUrl = clipUrl === '' ? undefined : clipUrl;
     this.hashBankService = new HashBankService(kyselyPg);
   }
 
@@ -1022,6 +1047,62 @@ export class HmaService {
     return response.body as unknown as Record<string, string>;
   }
 
+  isClipEnabled(): boolean {
+    return this.clipServiceUrl != null;
+  }
+
+  private requireClipUrl(): string {
+    if (this.clipServiceUrl == null) {
+      throw new Error('CLIP_HMA_SERVICE_URL is not set');
+    }
+    return this.clipServiceUrl;
+  }
+
+  /** Hashes an image with the CLIP HMA instance, e.g. `{ clip_float: '...' }`. */
+  async hashClipFromUrl(url: string): Promise<Record<string, string>> {
+    const response = await this.fetchHTTP({
+      url: `${this.requireClipUrl()}/h/hash?url=${encodeURIComponent(url)}`,
+      method: 'get',
+      handleResponseBody: 'as-json',
+    });
+
+    if (!response.ok) {
+      throw new HmaRequestError(
+        'Failed to hash content with CLIP',
+        response.status,
+      );
+    }
+
+    return response.body as unknown as Record<string, string>;
+  }
+
+  /**
+   * CLIP hashes are ~4 KB of hex, which exceeds the web server's request-line
+   * limit as a query string, so unlike lookupContent this is a JSON POST.
+   */
+  private async lookupClipSignal(
+    banks: string[],
+    signalType: string,
+    signal: string,
+  ): Promise<LookupResponse> {
+    const response = await this.fetchHTTP({
+      url: `${this.requireClipUrl()}/m/lookup`,
+      method: 'post',
+      body: jsonStringify({ signal_type: signalType, signal, banks }),
+      headers: { 'Content-Type': 'application/json' },
+      handleResponseBody: 'as-json',
+    });
+
+    if (!response.ok) {
+      throw new HmaRequestError(
+        'Failed to look up content with CLIP',
+        response.status,
+      );
+    }
+
+    return response.body as unknown as LookupResponse;
+  }
+
   async addContentToBank(
     bankName: string,
     options: {
@@ -1128,29 +1209,45 @@ export class HmaService {
    * Checks if an image matches any images in any of the provided hash banks
    * and returns detailed match information
    * @param hmaBankIds Array of hash bank IDs to check against
-   * @param signalType The type of signal (e.g. 'pdq', 'md5', etc.)
+   * @param signalType The type of signal (e.g. 'pdq', 'md5', 'clip_float').
+   * CLIP signals are looked up on the CLIP HMA instance, and never match when
+   * it is not configured.
    * @param signal The hash value to check
+   * @param options.maxDistance Ignore matches farther than this, in the units
+   * of the signal type (cosine distance for clip_float). HMA already applies
+   * its own cutoff per signal type (0.10 for clip_float), so this can only
+   * tighten matching, not loosen it. A match whose distance is missing or not
+   * a number never satisfies it.
    * @returns A promise that resolves to an object with matched status and list of matched banks
    */
   async checkImageMatchWithDetails(
     hmaBankIds: string[],
     signalType: string,
     signal: string,
+    options: { maxDistance?: number } = {},
   ): Promise<{ matched: boolean; matchedBanks: string[] }> {
-    const matches: LookupResponse = await this.lookupContent({
-      signal,
-      signalType,
-    });
-
-    const matchedBanks: string[] = [];
-
-    // Check which banks have matches
-    hmaBankIds.forEach((bankId) => {
-      const bankMatches = matches[bankId];
-      if (bankMatches && bankMatches.length > 0) {
-        // TODO: Implement some configuration for the distance threshold
-        matchedBanks.push(bankId);
+    let matches: LookupResponse;
+    if (isClipSignalType(signalType)) {
+      // HMA reads an empty bank list as "search every bank".
+      if (!this.isClipEnabled() || hmaBankIds.length === 0) {
+        return { matched: false, matchedBanks: [] };
       }
+      matches = await this.lookupClipSignal(hmaBankIds, signalType, signal);
+    } else {
+      matches = await this.lookupContent({ signal, signalType });
+    }
+
+    const { maxDistance } = options;
+    const matchedBanks = hmaBankIds.filter((bankId) => {
+      const bankMatches = matches[bankId];
+      return (
+        Array.isArray(bankMatches) &&
+        bankMatches.some(
+          (match) =>
+            maxDistance == null ||
+            isDistanceWithin(match.distance, maxDistance),
+        )
+      );
     });
 
     return {

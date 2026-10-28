@@ -57,6 +57,16 @@ HMA fetches whatever URL it is given (including following redirects), so anythin
 
    To go back to CPU, comment the `deploy` block out again and rebuild without those three variables.
 
+## Point Coop at it
+
+Set the instance's URL in `server/.env` and restart the Coop server:
+
+```bash
+CLIP_HMA_SERVICE_URL=http://localhost:9877
+```
+
+The URL has to be reachable from wherever the Coop server runs: `localhost:9877` works when the server runs on your host, while a server running in Docker needs the service name and container port, such as `http://hma-clip:5100` on the same Compose network. When unset, Coop treats CLIP as not deployed. Coop's HMA service uses this URL to hash images with CLIP and to look hashes up in CLIP banks, but nothing in the rule builder or ingestion uses it yet.
+
 ## Check that it works
 
 The first hash request downloads the model weights, so it can take a minute or two. Use any publicly reachable image URL.

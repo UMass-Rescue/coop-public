@@ -1,10 +1,11 @@
-import { vi, type Mock } from 'vitest';
+import { afterEach, vi, type Mock } from 'vitest';
 
 import { jsonParse } from '../../utils/encoding.js';
 import type { HashBank } from './dbTypes.js';
 import {
   HashBankUserError,
   HmaService,
+  isClipSignalType,
   type ExchangeInfo,
   type HashBankService,
 } from './index.js';
@@ -1103,6 +1104,274 @@ describe('HmaService', () => {
 
       expect(result.config_schema.fields).toHaveLength(0);
       expect(result.credentials_schema).toBeNull();
+    });
+  });
+
+  describe('CLIP instance', () => {
+    const CLIP_URL = 'http://hma-clip:5100';
+    const HASH = 'ab'.repeat(2048);
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    function makeClipService(fetchHTTP: Mock, url: string | null = CLIP_URL) {
+      vi.stubEnv('CLIP_HMA_SERVICE_URL', url ?? '');
+      return makeService(fetchHTTP);
+    }
+
+    it('is disabled until CLIP_HMA_SERVICE_URL is set', () => {
+      expect(makeClipService(vi.fn(), null).isClipEnabled()).toBe(false);
+      expect(makeClipService(vi.fn()).isClipEnabled()).toBe(true);
+    });
+
+    it('recognizes clip_float as a CLIP signal type and pdq as not', () => {
+      expect(isClipSignalType('clip_float')).toBe(true);
+      expect(isClipSignalType('pdq')).toBe(false);
+    });
+
+    describe('hashClipFromUrl', () => {
+      it('hashes through the CLIP instance, not the default one', async () => {
+        const fetchHTTP = routeFetch({
+          'GET /h/hash': ok({ clip_float: HASH }),
+        });
+        const svc = makeClipService(fetchHTTP);
+
+        await expect(
+          svc.hashClipFromUrl('https://img.example/a b.jpg?x=1&y=2'),
+        ).resolves.toEqual({ clip_float: HASH });
+
+        const [call] = callsTo(fetchHTTP, 'get', '/h/hash');
+        expect(call.url).toBe(
+          `${CLIP_URL}/h/hash?url=${encodeURIComponent('https://img.example/a b.jpg?x=1&y=2')}`,
+        );
+      });
+
+      it('tolerates a trailing slash on the configured URL', async () => {
+        const fetchHTTP = routeFetch({ 'GET /h/hash': ok({}) });
+        await makeClipService(fetchHTTP, `${CLIP_URL}/`).hashClipFromUrl('u');
+        expect(callsTo(fetchHTTP, 'get', '/h/hash')[0].url).toMatch(
+          /^http:\/\/hma-clip:5100\/h\/hash\?/,
+        );
+      });
+
+      it('throws without calling HMA when CLIP is not configured', async () => {
+        const fetchHTTP = vi.fn();
+        await expect(
+          makeClipService(fetchHTTP, null).hashClipFromUrl('u'),
+        ).rejects.toThrow('CLIP_HMA_SERVICE_URL is not set');
+        expect(fetchHTTP).not.toHaveBeenCalled();
+      });
+
+      it('throws an HmaRequestError carrying the HMA status', async () => {
+        const fetchHTTP = routeFetch({ 'GET /h/hash': fail(500) });
+        await expect(
+          makeClipService(fetchHTTP).hashClipFromUrl('u'),
+        ).rejects.toMatchObject({ name: 'HmaRequestError', status: 500 });
+      });
+    });
+
+    describe('checkImageMatchWithDetails for clip_float', () => {
+      const BANKS = ['COOP_ORG1_A', 'COOP_ORG1_B'];
+
+      it('POSTs the hash as JSON to the CLIP instance, restricted to the banks', async () => {
+        const fetchHTTP = routeFetch({
+          'POST /m/lookup': ok({
+            COOP_ORG1_A: [{ bank_content_id: 1, distance: '1.19e-07' }],
+          }),
+        });
+
+        const result = await makeClipService(
+          fetchHTTP,
+        ).checkImageMatchWithDetails(BANKS, 'clip_float', HASH);
+
+        expect(result).toEqual({
+          matched: true,
+          matchedBanks: ['COOP_ORG1_A'],
+        });
+        const [call] = callsTo(fetchHTTP, 'post', '/m/lookup');
+        expect(call.url).toBe(`${CLIP_URL}/m/lookup`);
+        expect(jsonParse(call.body!)).toEqual({
+          signal_type: 'clip_float',
+          signal: HASH,
+          banks: BANKS,
+        });
+        expect(callsTo(fetchHTTP, 'get', '/m/lookup')).toHaveLength(0);
+      });
+
+      it('reports no match when HMA returns no banks', async () => {
+        const fetchHTTP = routeFetch({ 'POST /m/lookup': ok({}) });
+        await expect(
+          makeClipService(fetchHTTP).checkImageMatchWithDetails(
+            BANKS,
+            'clip_float',
+            HASH,
+          ),
+        ).resolves.toEqual({ matched: false, matchedBanks: [] });
+      });
+
+      it('keeps a match exactly at maxDistance', async () => {
+        const fetchHTTP = routeFetch({
+          'POST /m/lookup': ok({
+            COOP_ORG1_A: [{ bank_content_id: 1, distance: '0.05' }],
+          }),
+        });
+        const result = await makeClipService(
+          fetchHTTP,
+        ).checkImageMatchWithDetails(BANKS, 'clip_float', HASH, {
+          maxDistance: 0.05,
+        });
+        expect(result.matchedBanks).toEqual(['COOP_ORG1_A']);
+      });
+
+      it.each([[''], ['  '], [null], [undefined], ['NaN']])(
+        'does not let a malformed distance (%j) satisfy maxDistance',
+        async (distance) => {
+          const fetchHTTP = routeFetch({
+            'POST /m/lookup': ok({
+              COOP_ORG1_A: [{ bank_content_id: 1, distance }],
+            }),
+          });
+          const result = await makeClipService(
+            fetchHTTP,
+          ).checkImageMatchWithDetails(BANKS, 'clip_float', HASH, {
+            maxDistance: 0.1,
+          });
+          expect(result.matched).toBe(false);
+        },
+      );
+
+      it('ignores a bank entry that is not a list of matches', async () => {
+        const fetchHTTP = routeFetch({
+          'POST /m/lookup': ok({ COOP_ORG1_A: 'unexpected' }),
+        });
+        const result = await makeClipService(
+          fetchHTTP,
+        ).checkImageMatchWithDetails(BANKS, 'clip_float', HASH);
+        expect(result.matched).toBe(false);
+      });
+
+      it('propagates a connection failure so callers can handle it', async () => {
+        const fetchHTTP = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
+        await expect(
+          makeClipService(fetchHTTP).checkImageMatchWithDetails(
+            BANKS,
+            'clip_float',
+            HASH,
+          ),
+        ).rejects.toThrow('ECONNREFUSED');
+      });
+
+      it('ignores banks that were not requested', async () => {
+        const fetchHTTP = routeFetch({
+          'POST /m/lookup': ok({
+            OTHER_BANK: [{ bank_content_id: 9, distance: '0.01' }],
+          }),
+        });
+        const result = await makeClipService(
+          fetchHTTP,
+        ).checkImageMatchWithDetails(BANKS, 'clip_float', HASH);
+        expect(result.matchedBanks).toEqual([]);
+      });
+
+      it('applies maxDistance as a tighter cutoff', async () => {
+        const fetchHTTP = routeFetch({
+          'POST /m/lookup': ok({
+            COOP_ORG1_A: [{ bank_content_id: 1, distance: '0.08' }],
+            COOP_ORG1_B: [
+              { bank_content_id: 2, distance: '0.09' },
+              { bank_content_id: 3, distance: '0.03' },
+            ],
+          }),
+        });
+        const svc = makeClipService(fetchHTTP);
+
+        const strict = await svc.checkImageMatchWithDetails(
+          BANKS,
+          'clip_float',
+          HASH,
+          { maxDistance: 0.05 },
+        );
+        expect(strict.matchedBanks).toEqual(['COOP_ORG1_B']);
+
+        const none = await svc.checkImageMatchWithDetails(
+          BANKS,
+          'clip_float',
+          HASH,
+          { maxDistance: 0.01 },
+        );
+        expect(none).toEqual({ matched: false, matchedBanks: [] });
+      });
+
+      it('excludes a match whose distance is not a number when maxDistance is set', async () => {
+        const fetchHTTP = routeFetch({
+          'POST /m/lookup': ok({
+            COOP_ORG1_A: [{ bank_content_id: 1, distance: 'n/a' }],
+          }),
+        });
+        const result = await makeClipService(
+          fetchHTTP,
+        ).checkImageMatchWithDetails(BANKS, 'clip_float', HASH, {
+          maxDistance: 0.1,
+        });
+        expect(result.matched).toBe(false);
+      });
+
+      it('does not call HMA with an empty bank list, which HMA reads as every bank', async () => {
+        const fetchHTTP = vi.fn();
+        await expect(
+          makeClipService(fetchHTTP).checkImageMatchWithDetails(
+            [],
+            'clip_float',
+            HASH,
+          ),
+        ).resolves.toEqual({ matched: false, matchedBanks: [] });
+        expect(fetchHTTP).not.toHaveBeenCalled();
+      });
+
+      it('never matches, without calling HMA, when CLIP is not configured', async () => {
+        const fetchHTTP = vi.fn();
+        await expect(
+          makeClipService(fetchHTTP, null).checkImageMatchWithDetails(
+            BANKS,
+            'clip_float',
+            HASH,
+          ),
+        ).resolves.toEqual({ matched: false, matchedBanks: [] });
+        expect(fetchHTTP).not.toHaveBeenCalled();
+      });
+
+      it('throws an HmaRequestError when HMA rejects the lookup', async () => {
+        const fetchHTTP = routeFetch({ 'POST /m/lookup': fail(503) });
+        await expect(
+          makeClipService(fetchHTTP).checkImageMatchWithDetails(
+            BANKS,
+            'clip_float',
+            HASH,
+          ),
+        ).rejects.toMatchObject({ name: 'HmaRequestError', status: 503 });
+      });
+    });
+
+    describe('checkImageMatchWithDetails for other signal types', () => {
+      it('still looks pdq up on the default instance with a GET', async () => {
+        vi.stubEnv('HMA_SERVICE_URL', 'http://default-hma:9876');
+        const fetchHTTP = routeFetch({
+          'GET /m/lookup': ok({
+            COOP_ORG1_A: [{ bank_content_id: 1, distance: '4' }],
+          }),
+        });
+
+        const result = await makeClipService(
+          fetchHTTP,
+        ).checkImageMatchWithDetails(['COOP_ORG1_A'], 'pdq', 'abc');
+
+        expect(result.matchedBanks).toEqual(['COOP_ORG1_A']);
+        const [call] = callsTo(fetchHTTP, 'get', '/m/lookup');
+        expect(call.url).toContain('http://default-hma:9876');
+        expect(call.url).toContain('signal_type=pdq');
+        expect(callsTo(fetchHTTP, 'post', '/m/lookup')).toHaveLength(0);
+      });
     });
   });
 });
