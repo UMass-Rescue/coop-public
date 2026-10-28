@@ -836,6 +836,7 @@ export type GQLCreateHashBankInput = {
   readonly description?: InputMaybe<Scalars['String']['input']>;
   readonly enabled_ratio: Scalars['Float']['input'];
   readonly exchange?: InputMaybe<GQLExchangeConfigInput>;
+  readonly hma_instance?: InputMaybe<GQLHashBankHmaInstance>;
   readonly name: Scalars['String']['input'];
 };
 
@@ -1483,12 +1484,24 @@ export type GQLHashBank = {
   readonly description?: Maybe<Scalars['String']['output']>;
   readonly enabled_ratio: Scalars['Float']['output'];
   readonly exchange?: Maybe<GQLExchangeInfo>;
+  readonly hma_instance: GQLHashBankHmaInstance;
   readonly hma_name: Scalars['String']['output'];
   readonly id: Scalars['ID']['output'];
   readonly name: Scalars['String']['output'];
   readonly org_id: Scalars['String']['output'];
 };
 
+/**
+ * Which HMA deployment holds a bank. DEFAULT is the standard HMA (PDQ images,
+ * MD5 video); CLIP is the optional CLIP instance. Fixed when the bank is created.
+ */
+export const GQLHashBankHmaInstance = {
+  Clip: 'CLIP',
+  Default: 'DEFAULT',
+} as const;
+
+export type GQLHashBankHmaInstance =
+  (typeof GQLHashBankHmaInstance)[keyof typeof GQLHashBankHmaInstance];
 export type GQLIgnoreDecisionComponent =
   GQLManualReviewDecisionComponentBase & {
     readonly __typename?: 'IgnoreDecisionComponent';
@@ -3667,6 +3680,11 @@ export type GQLQuery = {
   readonly getUserStrikeCountDistribution: ReadonlyArray<GQLUserStrikeBucket>;
   readonly hashBank?: Maybe<GQLHashBank>;
   readonly hashBankById?: Maybe<GQLHashBank>;
+  /**
+   * The HMA instances this deployment can create banks on. CLIP is listed only
+   * when the optional CLIP instance is configured.
+   */
+  readonly hashBankHmaInstances: ReadonlyArray<GQLHashBankHmaInstance>;
   readonly hashBanks: ReadonlyArray<GQLHashBank>;
   readonly integrationConfig: GQLIntegrationConfigQueryResponse;
   readonly inviteUserToken: GQLInviteUserTokenResponse;
@@ -6169,6 +6187,7 @@ export type GQLResolversTypes = {
   HandleTimeGroupByColumns: GQLHandleTimeGroupByColumns;
   HandleTimeInput: GQLHandleTimeInput;
   HashBank: ResolverTypeWrapper<HashBank>;
+  HashBankHmaInstance: GQLHashBankHmaInstance;
   ID: ResolverTypeWrapper<Scalars['ID']['output']>;
   IgnoreDecisionComponent: ResolverTypeWrapper<GQLIgnoreDecisionComponent>;
   Int: ResolverTypeWrapper<Scalars['Int']['output']>;
@@ -9475,6 +9494,11 @@ export type GQLHashBankResolvers<
   enabled_ratio?: Resolver<GQLResolversTypes['Float'], ParentType, ContextType>;
   exchange?: Resolver<
     Maybe<GQLResolversTypes['ExchangeInfo']>,
+    ParentType,
+    ContextType
+  >;
+  hma_instance?: Resolver<
+    GQLResolversTypes['HashBankHmaInstance'],
     ParentType,
     ContextType
   >;
@@ -12991,6 +13015,11 @@ export type GQLQueryResolvers<
     ParentType,
     ContextType,
     RequireFields<GQLQueryHashBankByIdArgs, 'id'>
+  >;
+  hashBankHmaInstances?: Resolver<
+    ReadonlyArray<GQLResolversTypes['HashBankHmaInstance']>,
+    ParentType,
+    ContextType
   >;
   hashBanks?: Resolver<
     ReadonlyArray<GQLResolversTypes['HashBank']>,

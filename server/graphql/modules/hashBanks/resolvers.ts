@@ -1,6 +1,7 @@
 import {
   HashBankUserError,
   type ExchangeCredentialJson,
+  type HmaInstance,
 } from '../../../services/hmaService/index.js';
 import { isCoopErrorOfType } from '../../../utils/errors.js';
 import type {
@@ -114,6 +115,19 @@ const Query: GQLQueryResolvers<Context> = {
     }
   },
 
+  async hashBankHmaInstances(_: unknown, __: unknown, context: Context) {
+    const user = context.getUser();
+    if (!user?.orgId) {
+      throw unauthenticatedError('User required.');
+    }
+
+    const instances: HmaInstance[] = ['DEFAULT'];
+    if (context.services.HMAHashBankService.isClipEnabled()) {
+      instances.push('CLIP');
+    }
+    return instances;
+  },
+
   async exchangeApis(_: unknown, __: unknown, context: Context) {
     const user = context.getUser();
     if (!user?.orgId) {
@@ -151,6 +165,7 @@ const Mutation: GQLMutationResolvers<Context> = {
         name: string;
         description?: string | null;
         enabled_ratio: number;
+        hma_instance?: HmaInstance | null;
         exchange?: ExchangeConfigInput | null;
       };
     },
@@ -184,6 +199,7 @@ const Mutation: GQLMutationResolvers<Context> = {
         input.description ?? '',
         input.enabled_ratio,
         exchangeConfig,
+        input.hma_instance ?? 'DEFAULT',
       );
 
       return gqlSuccessResult({ data: bank }, 'MutateHashBankSuccessResponse');
@@ -291,12 +307,13 @@ const Mutation: GQLMutationResolvers<Context> = {
 
 const HashBank = {
   async exchange(
-    parent: { hma_name: string },
+    parent: { hma_name: string; hma_instance: HmaInstance },
     _args: unknown,
     context: Context,
   ) {
     return context.services.HMAHashBankService.getExchangeForBank(
       parent.hma_name,
+      parent.hma_instance,
     );
   },
 };

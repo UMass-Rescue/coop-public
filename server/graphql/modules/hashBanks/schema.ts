@@ -12,12 +12,22 @@ export const typeDefs = /* GraphQL */ `
     is_fetching: Boolean
   }
 
+  """
+  Which HMA deployment holds a bank. DEFAULT is the standard HMA (PDQ images,
+  MD5 video); CLIP is the optional CLIP instance. Fixed when the bank is created.
+  """
+  enum HashBankHmaInstance {
+    DEFAULT
+    CLIP
+  }
+
   type HashBank {
     id: ID!
     name: String!
     description: String
     hma_name: String!
     enabled_ratio: Float!
+    hma_instance: HashBankHmaInstance!
     org_id: String!
     exchange: ExchangeInfo
   }
@@ -61,6 +71,7 @@ export const typeDefs = /* GraphQL */ `
     name: String!
     description: String
     enabled_ratio: Float!
+    hma_instance: HashBankHmaInstance = DEFAULT
     exchange: ExchangeConfigInput
   }
 
@@ -93,6 +104,11 @@ export const typeDefs = /* GraphQL */ `
     hashBanks: [HashBank!]!
     hashBank(name: String!): HashBank
     hashBankById(id: ID!): HashBank
+    """
+    The HMA instances this deployment can create banks on. CLIP is listed only
+    when the optional CLIP instance is configured.
+    """
+    hashBankHmaInstances: [HashBankHmaInstance!]!
     exchangeApis: [ExchangeApiInfo!]!
     exchangeApiSchema(apiName: String!): ExchangeApiSchema
   }

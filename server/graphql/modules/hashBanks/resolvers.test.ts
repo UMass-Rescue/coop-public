@@ -13,6 +13,7 @@ const MOCK_BANK: HashBank = {
   hma_name: 'COOP_ORG1_TEST_BANK',
   description: 'desc',
   enabled_ratio: 1.0,
+  hma_instance: 'DEFAULT',
   org_id: 'org1',
   created_at: new Date(),
   updated_at: new Date(),
@@ -73,7 +74,51 @@ describe('hashBanks resolvers', () => {
         'desc',
         1,
         undefined,
+        'DEFAULT',
       );
+    });
+
+    it('creates the bank on the requested HMA instance', async () => {
+      const ctx = makeContext();
+      const input = {
+        name: 'clip bank',
+        description: 'desc',
+        enabled_ratio: 1,
+        hma_instance: 'CLIP' as const,
+      };
+
+      await (resolvers.Mutation as any).createHashBank({}, { input }, ctx);
+
+      expect(ctx.services.HMAHashBankService.createBank).toHaveBeenCalledWith(
+        'org1',
+        'clip bank',
+        'desc',
+        1,
+        undefined,
+        'CLIP',
+      );
+    });
+
+    it('surfaces a bank-creation rejection as a user input error', async () => {
+      const ctx = makeContext({
+        createBank: vi
+          .fn()
+          .mockRejectedValue(new HashBankUserError('CLIP is not available')),
+      });
+
+      await expect(
+        (resolvers.Mutation as any).createHashBank(
+          {},
+          {
+            input: {
+              name: 'clip bank',
+              enabled_ratio: 1,
+              hma_instance: 'CLIP',
+            },
+          },
+          ctx,
+        ),
+      ).rejects.toThrow('CLIP is not available');
     });
 
     it('passes the credentials to createBank instead of setting them separately', async () => {
@@ -107,6 +152,7 @@ describe('hashBanks resolvers', () => {
           apiJson: { privacy_group: 123 },
           credentialJson: { api_token: 'tok' },
         },
+        'DEFAULT',
       );
       expect(
         ctx.services.HMAHashBankService.setExchangeCredentials,
@@ -307,7 +353,7 @@ describe('hashBanks resolvers', () => {
       });
 
       const result = await (resolvers as any).HashBank.exchange(
-        { hma_name: 'COOP_ORG1_TEST_BANK' },
+        { hma_name: 'COOP_ORG1_TEST_BANK', hma_instance: 'DEFAULT' },
         {},
         ctx,
       );
@@ -315,19 +361,58 @@ describe('hashBanks resolvers', () => {
       expect(result).toEqual(exchangeInfo);
       expect(
         ctx.services.HMAHashBankService.getExchangeForBank,
-      ).toHaveBeenCalledWith('COOP_ORG1_TEST_BANK');
+      ).toHaveBeenCalledWith('COOP_ORG1_TEST_BANK', 'DEFAULT');
     });
 
     it('returns null when no exchange is configured', async () => {
       const ctx = makeContext();
 
       const result = await (resolvers as any).HashBank.exchange(
-        { hma_name: 'COOP_ORG1_STANDALONE' },
+        { hma_name: 'COOP_ORG1_STANDALONE', hma_instance: 'DEFAULT' },
         {},
         ctx,
       );
 
       expect(result).toBeNull();
+    });
+
+    it("passes the bank's HMA instance through", async () => {
+      const ctx = makeContext();
+
+      await (resolvers as any).HashBank.exchange(
+        { hma_name: 'COOP_ORG1_CLIP', hma_instance: 'CLIP' },
+        {},
+        ctx,
+      );
+
+      expect(
+        ctx.services.HMAHashBankService.getExchangeForBank,
+      ).toHaveBeenCalledWith('COOP_ORG1_CLIP', 'CLIP');
+    });
+  });
+
+  describe('Query.hashBankHmaInstances', () => {
+    it('offers only DEFAULT when CLIP is not deployed', async () => {
+      const ctx = makeContext({
+        isClipEnabled: vi.fn().mockReturnValue(false),
+      });
+      await expect(
+        (resolvers.Query as any).hashBankHmaInstances({}, {}, ctx),
+      ).resolves.toEqual(['DEFAULT']);
+    });
+
+    it('offers CLIP too when CLIP is deployed', async () => {
+      const ctx = makeContext({ isClipEnabled: vi.fn().mockReturnValue(true) });
+      await expect(
+        (resolvers.Query as any).hashBankHmaInstances({}, {}, ctx),
+      ).resolves.toEqual(['DEFAULT', 'CLIP']);
+    });
+
+    it('requires a signed-in user', async () => {
+      const ctx = { ...makeContext(), getUser: () => null };
+      await expect(
+        (resolvers.Query as any).hashBankHmaInstances({}, {}, ctx),
+      ).rejects.toThrow();
     });
   });
 });

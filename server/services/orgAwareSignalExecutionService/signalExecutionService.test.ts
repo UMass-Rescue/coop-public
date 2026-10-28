@@ -22,6 +22,7 @@ describe('Signal Execution Service', () => {
           hma_name: 'org_test-bank',
           description: null,
           enabled_ratio: 1.0,
+          hma_instance: 'DEFAULT' as const,
           org_id: 'test-org',
           created_at: new Date(),
           updated_at: new Date(),

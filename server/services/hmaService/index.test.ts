@@ -16,6 +16,7 @@ const MOCK_BANK: HashBank = {
   hma_name: 'COOP_ORG1_TEST_BANK',
   description: 'desc',
   enabled_ratio: 1.0,
+  hma_instance: 'DEFAULT',
   org_id: 'org1',
   created_at: new Date(),
   updated_at: new Date(),
@@ -57,6 +58,10 @@ type MockDbOpts = {
   writesFail?: boolean;
   // hma_names already used by some bank, in any org.
   takenHmaNames?: string[];
+  // The bank the mock holds, in place of MOCK_BANK.
+  bank?: HashBank;
+  // Every bank in the org, as returned by a list query.
+  banks?: HashBank[];
 };
 
 /**
@@ -64,15 +69,20 @@ type MockDbOpts = {
  * a query only finds MOCK_BANK when it's scoped to MOCK_BANK's org.
  */
 function makeMockKyselyPg(opts: MockDbOpts = {}) {
+  const held = opts.bank ?? MOCK_BANK;
   const set = vi.fn();
+  const inserted = vi.fn();
   const makeChain = () => {
     let filters: Record<string, unknown> = {};
     const chain = {
-      values: vi.fn().mockReturnThis(),
+      values: vi.fn((values: unknown) => {
+        inserted(values);
+        return chain;
+      }),
       returningAll: vi.fn().mockReturnThis(),
       executeTakeFirstOrThrow: opts.writesFail
         ? vi.fn().mockRejectedValue(new Error('write failed'))
-        : vi.fn().mockResolvedValue(MOCK_BANK),
+        : vi.fn().mockResolvedValue(held),
       selectAll: vi.fn().mockReturnThis(),
       select: vi.fn().mockReturnThis(),
       limit: vi.fn().mockReturnThis(),
@@ -83,20 +93,20 @@ function makeMockKyselyPg(opts: MockDbOpts = {}) {
       executeTakeFirst: vi.fn(async () => {
         if ('hma_name' in filters) {
           const hmaName = String(filters.hma_name);
-          return hmaName === MOCK_BANK.hma_name ||
+          return hmaName === held.hma_name ||
             (opts.takenHmaNames ?? []).includes(hmaName)
             ? { id: 99 }
             : undefined;
         }
-        if (filters.org_id !== MOCK_BANK.org_id) {
+        if (filters.org_id !== held.org_id) {
           return undefined;
         }
-        if ('name' in filters && filters.name !== MOCK_BANK.name) {
+        if ('name' in filters && filters.name !== held.name) {
           return undefined;
         }
-        return MOCK_BANK;
+        return held;
       }),
-      execute: vi.fn().mockResolvedValue([]),
+      execute: vi.fn().mockResolvedValue(opts.banks ?? []),
       set: vi.fn((values: unknown) => {
         set(values);
         return chain;
@@ -113,6 +123,8 @@ function makeMockKyselyPg(opts: MockDbOpts = {}) {
       deleteFrom,
     } as unknown as ConstructorParameters<typeof HmaService>[1],
     deleteFrom,
+    // Values passed to each INSERT so far.
+    inserts: () => inserted.mock.calls.map(([values]) => values as unknown),
     // Values passed to each UPDATE ... SET so far.
     updates: () => set.mock.calls.map(([values]) => values as unknown),
   };
@@ -128,11 +140,14 @@ function makeTracer() {
 
 function makeService(
   fetchHTTP: Mock,
-  opts: MockDbOpts & { tracer?: ReturnType<typeof makeTracer> } = {},
+  opts: MockDbOpts & {
+    tracer?: ReturnType<typeof makeTracer>;
+    mockDb?: ReturnType<typeof makeMockKyselyPg>;
+  } = {},
 ): HmaService {
   return new HmaService(
     fetchHTTP as never,
-    makeMockKyselyPg(opts).db,
+    (opts.mockDb ?? makeMockKyselyPg(opts)).db,
     opts.tracer ?? makeTracer(),
   );
 }
@@ -1115,9 +1130,13 @@ describe('HmaService', () => {
       vi.unstubAllEnvs();
     });
 
-    function makeClipService(fetchHTTP: Mock, url: string | null = CLIP_URL) {
+    function makeClipService(
+      fetchHTTP: Mock,
+      url: string | null = CLIP_URL,
+      opts: Parameters<typeof makeService>[1] = {},
+    ) {
       vi.stubEnv('CLIP_HMA_SERVICE_URL', url ?? '');
-      return makeService(fetchHTTP);
+      return makeService(fetchHTTP, opts);
     }
 
     it('is disabled until CLIP_HMA_SERVICE_URL is set', () => {
@@ -1350,6 +1369,292 @@ describe('HmaService', () => {
             HASH,
           ),
         ).rejects.toMatchObject({ name: 'HmaRequestError', status: 503 });
+      });
+    });
+
+    describe('banks on the CLIP instance', () => {
+      const CLIP_BANK: HashBank = {
+        ...MOCK_BANK,
+        id: 2,
+        name: 'clip bank',
+        hma_name: 'COOP_ORG1_CLIP_BANK',
+        hma_instance: 'CLIP',
+      };
+
+      function urlsOf(fetchHTTP: Mock): string[] {
+        return fetchHTTP.mock.calls.map((c) => (c[0] as { url: string }).url);
+      }
+
+      describe('createBank', () => {
+        const routes = {
+          'GET /c/bank/COOP_ORG1_NEW_CLIP': fail(404),
+          'POST /c/banks': created(),
+        };
+
+        it('creates the bank on the CLIP instance and records the instance', async () => {
+          const mockDb = makeMockKyselyPg();
+          const fetchHTTP = routeFetch(routes);
+          const svc = makeClipService(fetchHTTP, CLIP_URL, { mockDb });
+
+          await svc.createBank('org1', 'new clip', 'd', 1, undefined, 'CLIP');
+
+          const [post] = callsTo(fetchHTTP, 'post', '/c/banks');
+          expect(post.url).toBe(`${CLIP_URL}/c/banks`);
+          expect(urlsOf(fetchHTTP).every((u) => u.startsWith(CLIP_URL))).toBe(
+            true,
+          );
+          expect(mockDb.inserts()).toEqual([
+            expect.objectContaining({
+              hma_name: 'COOP_ORG1_NEW_CLIP',
+              hma_instance: 'CLIP',
+            }),
+          ]);
+        });
+
+        it('creates default banks on the default instance', async () => {
+          const mockDb = makeMockKyselyPg();
+          const fetchHTTP = routeFetch({ 'POST /c/banks': created() });
+          const svc = makeClipService(fetchHTTP, CLIP_URL, { mockDb });
+
+          await svc.createBank('org1', 'my bank', 'd', 1);
+
+          const [post] = callsTo(fetchHTTP, 'post', '/c/banks');
+          expect(post.url).toContain('localhost:9876');
+          expect(mockDb.inserts()).toEqual([
+            expect.objectContaining({ hma_instance: 'DEFAULT' }),
+          ]);
+        });
+
+        it('probes the CLIP instance for a free name and takes a suffix when it is taken', async () => {
+          const fetchHTTP = routeFetch({
+            'GET /c/bank/COOP_ORG1_NEW_CLIP': ok({}),
+            'GET /c/bank/COOP_ORG1_NEW_CLIP_2': fail(404),
+            'POST /c/banks': created(),
+          });
+          const svc = makeClipService(fetchHTTP);
+
+          await svc.createBank('org1', 'new clip', 'd', 1, undefined, 'CLIP');
+
+          const probes = callsTo(fetchHTTP, 'get', '/c/bank/');
+          expect(probes.map((c) => c.url)).toEqual([
+            `${CLIP_URL}/c/bank/COOP_ORG1_NEW_CLIP`,
+            `${CLIP_URL}/c/bank/COOP_ORG1_NEW_CLIP_2`,
+          ]);
+          const [post] = callsTo(fetchHTTP, 'post', '/c/banks');
+          expect(jsonParse(post.body!)).toMatchObject({
+            name: 'COOP_ORG1_NEW_CLIP_2',
+          });
+        });
+
+        it('removes the CLIP bank from the CLIP instance when the local insert fails', async () => {
+          const fetchHTTP = routeFetch({
+            'GET /c/bank/COOP_ORG1_NEW_CLIP': fail(404),
+            'POST /c/banks': created(),
+            'DELETE /c/bank/COOP_ORG1_NEW_CLIP': ok({}),
+          });
+          const svc = makeClipService(fetchHTTP, CLIP_URL, {
+            writesFail: true,
+          });
+
+          await expect(
+            svc.createBank('org1', 'new clip', 'd', 1, undefined, 'CLIP'),
+          ).rejects.toThrow('write failed');
+
+          const [del] = callsTo(fetchHTTP, 'delete', '/c/bank/');
+          expect(del.url).toBe(`${CLIP_URL}/c/bank/COOP_ORG1_NEW_CLIP`);
+        });
+
+        it('rejects a CLIP bank when CLIP is not deployed, without calling HMA', async () => {
+          const fetchHTTP = vi.fn();
+          await expect(
+            makeClipService(fetchHTTP, null).createBank(
+              'org1',
+              'new clip',
+              'd',
+              1,
+              undefined,
+              'CLIP',
+            ),
+          ).rejects.toBeInstanceOf(HashBankUserError);
+          expect(fetchHTTP).not.toHaveBeenCalled();
+        });
+
+        it('rejects a CLIP bank connected to an exchange, without calling HMA', async () => {
+          const fetchHTTP = vi.fn();
+          await expect(
+            makeClipService(fetchHTTP).createBank(
+              'org1',
+              'new clip',
+              'd',
+              1,
+              { apiName: 'ncmec', apiJson: {} },
+              'CLIP',
+            ),
+          ).rejects.toBeInstanceOf(HashBankUserError);
+          expect(fetchHTTP).not.toHaveBeenCalled();
+        });
+      });
+
+      describe('when CLIP is not deployed', () => {
+        it('hides CLIP banks from listBanks without calling HMA or deleting them', async () => {
+          const mockDb = makeMockKyselyPg({ banks: [MOCK_BANK, CLIP_BANK] });
+          const fetchHTTP = routeFetch({
+            'GET /c/bank/COOP_ORG1_TEST_BANK': ok({}),
+          });
+          const svc = makeClipService(fetchHTTP, null, { mockDb });
+
+          const banks = await svc.listBanks('org1');
+
+          expect(banks.map((b) => b.name)).toEqual(['test bank']);
+          expect(urlsOf(fetchHTTP).some((u) => u.includes('CLIP_BANK'))).toBe(
+            false,
+          );
+          expect(mockDb.deleteFrom).not.toHaveBeenCalled();
+        });
+
+        it.each([
+          [
+            'getBank',
+            async (svc: HmaService) => svc.getBank('org1', 'clip bank'),
+          ],
+          [
+            'getBankById',
+            async (svc: HmaService) => svc.getBankById('org1', 2),
+          ],
+        ])(
+          '%s returns null without calling HMA or deleting',
+          async (_n, get) => {
+            const mockDb = makeMockKyselyPg({ bank: CLIP_BANK });
+            const fetchHTTP = vi.fn();
+            const svc = makeClipService(fetchHTTP, null, { mockDb });
+
+            await expect(get(svc)).resolves.toBeNull();
+            expect(fetchHTTP).not.toHaveBeenCalled();
+            expect(mockDb.deleteFrom).not.toHaveBeenCalled();
+          },
+        );
+
+        it('refuses to update or delete a CLIP bank with a user error', async () => {
+          const mockDb = makeMockKyselyPg({ bank: CLIP_BANK });
+          const fetchHTTP = vi.fn();
+          const svc = makeClipService(fetchHTTP, null, { mockDb });
+
+          await expect(
+            svc.updateBank('org1', '2', { name: 'x' }),
+          ).rejects.toBeInstanceOf(HashBankUserError);
+          await expect(svc.deleteBank('org1', '2')).rejects.toBeInstanceOf(
+            HashBankUserError,
+          );
+          expect(fetchHTTP).not.toHaveBeenCalled();
+        });
+      });
+
+      describe('when CLIP is deployed', () => {
+        it('verifies CLIP banks on the CLIP instance and default banks on the default one', async () => {
+          const mockDb = makeMockKyselyPg({ banks: [MOCK_BANK, CLIP_BANK] });
+          const fetchHTTP = routeFetch({
+            'GET /c/bank/COOP_ORG1_TEST_BANK': ok({}),
+            'GET /c/bank/COOP_ORG1_CLIP_BANK': ok({}),
+          });
+          const svc = makeClipService(fetchHTTP, CLIP_URL, { mockDb });
+
+          const banks = await svc.listBanks('org1');
+
+          expect(banks.map((b) => b.name)).toEqual(['test bank', 'clip bank']);
+          const [clipCall] = callsTo(fetchHTTP, 'get', 'CLIP_BANK');
+          const [defaultCall] = callsTo(fetchHTTP, 'get', 'TEST_BANK');
+          expect(clipCall.url).toBe(`${CLIP_URL}/c/bank/COOP_ORG1_CLIP_BANK`);
+          expect(defaultCall.url).toContain('localhost:9876');
+        });
+
+        it('keeps a CLIP bank the CLIP instance reports missing, without touching exchanges', async () => {
+          const mockDb = makeMockKyselyPg({ banks: [CLIP_BANK] });
+          const fetchHTTP = routeFetch({
+            'GET /c/bank/COOP_ORG1_CLIP_BANK': fail(404),
+          });
+          const tracer = makeTracer();
+          const svc = makeClipService(fetchHTTP, CLIP_URL, { mockDb, tracer });
+
+          const banks = await svc.listBanks('org1');
+
+          expect(banks.map((b) => b.name)).toEqual(['clip bank']);
+          expect(mockDb.deleteFrom).not.toHaveBeenCalled();
+          expect(callsTo(fetchHTTP, 'delete', '/c/exchange')).toHaveLength(0);
+          expect(tracer.logActiveSpanFailedIfAny).toHaveBeenCalledWith(
+            expect.objectContaining({ status: 404 }),
+          );
+        });
+
+        it('keeps a CLIP bank when the CLIP instance is unreachable', async () => {
+          const mockDb = makeMockKyselyPg({ banks: [CLIP_BANK] });
+          const fetchHTTP = vi
+            .fn()
+            .mockRejectedValue(new Error('ECONNREFUSED'));
+          const svc = makeClipService(fetchHTTP, CLIP_URL, { mockDb });
+
+          const banks = await svc.listBanks('org1');
+
+          expect(banks.map((b) => b.name)).toEqual(['clip bank']);
+          expect(mockDb.deleteFrom).not.toHaveBeenCalled();
+        });
+
+        it('renames and deletes on the CLIP instance with no exchange lookups', async () => {
+          const mockDb = makeMockKyselyPg({ bank: CLIP_BANK });
+          const fetchHTTP = routeFetch({
+            'GET /c/bank/COOP_ORG1_RENAMED_CLIP': fail(404),
+            'PUT /c/bank/COOP_ORG1_CLIP_BANK': ok({}),
+            'DELETE /c/bank/COOP_ORG1_RENAMED_CLIP': ok({}),
+            'DELETE /c/bank/COOP_ORG1_CLIP_BANK': ok({}),
+          });
+          const svc = makeClipService(fetchHTTP, CLIP_URL, { mockDb });
+
+          await svc.updateBank('org1', '2', { name: 'renamed clip' });
+          await svc.deleteBank('org1', '2');
+
+          expect(urlsOf(fetchHTTP).every((u) => u.startsWith(CLIP_URL))).toBe(
+            true,
+          );
+          expect(urlsOf(fetchHTTP).some((u) => u.includes('/c/exchange'))).toBe(
+            false,
+          );
+        });
+
+        it('renames the CLIP bank back on the CLIP instance when the local update fails', async () => {
+          const mockDb = makeMockKyselyPg({
+            bank: CLIP_BANK,
+            writesFail: true,
+          });
+          const fetchHTTP = routeFetch({
+            'GET /c/bank/COOP_ORG1_RENAMED_CLIP': fail(404),
+            'PUT /c/bank/COOP_ORG1_CLIP_BANK': ok({}),
+            'PUT /c/bank/COOP_ORG1_RENAMED_CLIP': ok({}),
+          });
+          const svc = makeClipService(fetchHTTP, CLIP_URL, { mockDb });
+
+          await expect(
+            svc.updateBank('org1', '2', { name: 'renamed clip' }),
+          ).rejects.toThrow('write failed');
+
+          const puts = callsTo(fetchHTTP, 'put', '/c/bank/');
+          expect(puts.map((c) => c.url)).toEqual([
+            `${CLIP_URL}/c/bank/COOP_ORG1_CLIP_BANK`,
+            `${CLIP_URL}/c/bank/COOP_ORG1_RENAMED_CLIP`,
+          ]);
+          expect(jsonParse(puts[1].body!)).toEqual({
+            name: 'COOP_ORG1_CLIP_BANK',
+          });
+        });
+
+        it('reports no exchange for a CLIP bank without calling HMA', async () => {
+          const fetchHTTP = vi.fn();
+          await expect(
+            makeClipService(fetchHTTP).getExchangeForBank(
+              'COOP_ORG1_CLIP_BANK',
+              'CLIP',
+            ),
+          ).resolves.toBeNull();
+          expect(fetchHTTP).not.toHaveBeenCalled();
+        });
       });
     });
 
