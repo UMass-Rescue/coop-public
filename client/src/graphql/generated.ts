@@ -5512,8 +5512,18 @@ export type GQLHashBanksQuery = {
     readonly description?: string | null;
     readonly hma_name: string;
     readonly enabled_ratio: number;
+    readonly hma_instance: GQLHashBankHmaInstance;
     readonly org_id: string;
   }>;
+};
+
+export type GQLHashBankHmaInstancesQueryVariables = Exact<{
+  [key: string]: never;
+}>;
+
+export type GQLHashBankHmaInstancesQuery = {
+  readonly __typename: 'Query';
+  readonly hashBankHmaInstances: ReadonlyArray<GQLHashBankHmaInstance>;
 };
 
 export type GQLHashBankByIdQueryVariables = Exact<{
@@ -5529,6 +5539,7 @@ export type GQLHashBankByIdQuery = {
     readonly description?: string | null;
     readonly hma_name: string;
     readonly enabled_ratio: number;
+    readonly hma_instance: GQLHashBankHmaInstance;
     readonly org_id: string;
     readonly exchange?: {
       readonly __typename: 'ExchangeInfo';
@@ -26882,6 +26893,7 @@ export const GQLHashBanksDocument = gql`
       description
       hma_name
       enabled_ratio
+      hma_instance
       org_id
     }
   }
@@ -26974,6 +26986,102 @@ export type GQLHashBanksQueryResult = Apollo.QueryResult<
   GQLHashBanksQuery,
   GQLHashBanksQueryVariables
 >;
+export const GQLHashBankHmaInstancesDocument = gql`
+  query HashBankHmaInstances {
+    hashBankHmaInstances
+  }
+`;
+
+/**
+ * __useGQLHashBankHmaInstancesQuery__
+ *
+ * To run a query within a React component, call `useGQLHashBankHmaInstancesQuery` and pass it any options that fit your needs.
+ * When your component renders, `useGQLHashBankHmaInstancesQuery` returns an object from Apollo Client that contains loading, error, and data properties
+ * you can use to render your UI.
+ *
+ * @param baseOptions options that will be passed into the query, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options;
+ *
+ * @example
+ * const { data, loading, error } = useGQLHashBankHmaInstancesQuery({
+ *   variables: {
+ *   },
+ * });
+ */
+export function useGQLHashBankHmaInstancesQuery(
+  baseOptions?: Apollo.QueryHookOptions<
+    GQLHashBankHmaInstancesQuery,
+    GQLHashBankHmaInstancesQueryVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return Apollo.useQuery<
+    GQLHashBankHmaInstancesQuery,
+    GQLHashBankHmaInstancesQueryVariables
+  >(GQLHashBankHmaInstancesDocument, options);
+}
+export function useGQLHashBankHmaInstancesLazyQuery(
+  baseOptions?: Apollo.LazyQueryHookOptions<
+    GQLHashBankHmaInstancesQuery,
+    GQLHashBankHmaInstancesQueryVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return Apollo.useLazyQuery<
+    GQLHashBankHmaInstancesQuery,
+    GQLHashBankHmaInstancesQueryVariables
+  >(GQLHashBankHmaInstancesDocument, options);
+}
+// @ts-ignore
+export function useGQLHashBankHmaInstancesSuspenseQuery(
+  baseOptions?: Apollo.SuspenseQueryHookOptions<
+    GQLHashBankHmaInstancesQuery,
+    GQLHashBankHmaInstancesQueryVariables
+  >,
+): Apollo.UseSuspenseQueryResult<
+  GQLHashBankHmaInstancesQuery,
+  GQLHashBankHmaInstancesQueryVariables
+>;
+export function useGQLHashBankHmaInstancesSuspenseQuery(
+  baseOptions?:
+    | Apollo.SkipToken
+    | Apollo.SuspenseQueryHookOptions<
+        GQLHashBankHmaInstancesQuery,
+        GQLHashBankHmaInstancesQueryVariables
+      >,
+): Apollo.UseSuspenseQueryResult<
+  GQLHashBankHmaInstancesQuery | undefined,
+  GQLHashBankHmaInstancesQueryVariables
+>;
+export function useGQLHashBankHmaInstancesSuspenseQuery(
+  baseOptions?:
+    | Apollo.SkipToken
+    | Apollo.SuspenseQueryHookOptions<
+        GQLHashBankHmaInstancesQuery,
+        GQLHashBankHmaInstancesQueryVariables
+      >,
+) {
+  const options =
+    baseOptions === Apollo.skipToken
+      ? baseOptions
+      : { ...defaultOptions, ...baseOptions };
+  return Apollo.useSuspenseQuery<
+    GQLHashBankHmaInstancesQuery,
+    GQLHashBankHmaInstancesQueryVariables
+  >(GQLHashBankHmaInstancesDocument, options);
+}
+export type GQLHashBankHmaInstancesQueryHookResult = ReturnType<
+  typeof useGQLHashBankHmaInstancesQuery
+>;
+export type GQLHashBankHmaInstancesLazyQueryHookResult = ReturnType<
+  typeof useGQLHashBankHmaInstancesLazyQuery
+>;
+export type GQLHashBankHmaInstancesSuspenseQueryHookResult = ReturnType<
+  typeof useGQLHashBankHmaInstancesSuspenseQuery
+>;
+export type GQLHashBankHmaInstancesQueryResult = Apollo.QueryResult<
+  GQLHashBankHmaInstancesQuery,
+  GQLHashBankHmaInstancesQueryVariables
+>;
 export const GQLHashBankByIdDocument = gql`
   query HashBankById($id: ID!) {
     hashBankById(id: $id) {
@@ -26982,6 +27090,7 @@ export const GQLHashBankByIdDocument = gql`
       description
       hma_name
       enabled_ratio
+      hma_instance
       org_id
       exchange {
         api
@@ -46065,6 +46174,7 @@ export const namedOperations = {
   Query: {
     ApiAuth: 'ApiAuth',
     HashBanks: 'HashBanks',
+    HashBankHmaInstances: 'HashBankHmaInstances',
     HashBankById: 'HashBankById',
     ExchangeApis: 'ExchangeApis',
     ExchangeApiSchema: 'ExchangeApiSchema',

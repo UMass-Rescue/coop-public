@@ -18,10 +18,12 @@ import { stringSort } from '../../components/table/sort';
 import CustomTable from '../../components/table/Table';
 
 import {
+  GQLHashBankHmaInstance,
   namedOperations,
   useGQLDeleteHashBankMutation,
   useGQLHashBanksQuery,
 } from '../../../../graphql/generated';
+import { hashBankInstanceLabel } from './HashBankInstanceSelect';
 
 const getStatusColor = (enabled_ratio: number) => {
   if (enabled_ratio === 0) return 'red';
@@ -90,6 +92,12 @@ export default function HashBanksDashboard() {
     [editBank, showModal],
   );
 
+  const banks = data?.hashBanks;
+  // The column only matters once the deployment has CLIP banks to tell apart.
+  const showTypeColumn =
+    banks?.some((bank) => bank.hma_instance === GQLHashBankHmaInstance.Clip) ??
+    false;
+
   const columns = useMemo(
     () => [
       {
@@ -118,6 +126,15 @@ export default function HashBanksDashboard() {
         filterFn: 'text' as const,
         sortFn: stringSort,
       },
+      ...(showTypeColumn
+        ? [
+            {
+              header: 'Type',
+              accessorKey: 'hma_instance',
+              enableSorting: false,
+            },
+          ]
+        : []),
       {
         header: 'Status',
         accessorKey: 'enabled_ratio',
@@ -129,9 +146,8 @@ export default function HashBanksDashboard() {
         enableSorting: false,
       },
     ],
-    [],
+    [showTypeColumn],
   );
-  const banks = data?.hashBanks;
 
   const dataValues = useMemo(
     () =>
@@ -139,6 +155,7 @@ export default function HashBanksDashboard() {
         name: bank.name,
         description: bank.description,
         enabled_ratio: bank.enabled_ratio,
+        hma_instance: bank.hma_instance,
         id: bank.id,
       })),
     [banks],
@@ -151,6 +168,17 @@ export default function HashBanksDashboard() {
           mutations: mutations(values.id),
           name: values.name,
           description: <div className="italic">{values.description}</div>,
+          hma_instance: (
+            <Tag
+              color={
+                values.hma_instance === GQLHashBankHmaInstance.Clip
+                  ? 'purple'
+                  : 'default'
+              }
+            >
+              {hashBankInstanceLabel(values.hma_instance)}
+            </Tag>
+          ),
           enabled_ratio: (
             <Tag color={getStatusColor(values.enabled_ratio)}>
               {getStatusText(values.enabled_ratio)}

@@ -12,15 +12,20 @@ import NameDescriptionInput from '../../components/NameDescriptionInput';
 
 import {
   GQLHashBankByIdDocument,
+  GQLHashBankHmaInstance,
   namedOperations,
   useGQLCreateHashBankMutation,
   useGQLExchangeApiSchemaLazyQuery,
   useGQLExchangeApisQuery,
   useGQLHashBankByIdQuery,
+  useGQLHashBankHmaInstancesQuery,
   useGQLUpdateHashBankExchangeCredentialsMutation,
   useGQLUpdateHashBankMutation,
   type GQLExchangeApiSchemaQuery,
 } from '../../../../graphql/generated';
+import HashBankInstanceSelect, {
+  hashBankInstanceLabel,
+} from './HashBankInstanceSelect';
 
 function userInputErrorMessage(
   error: {
@@ -225,6 +230,9 @@ export default function HashBankForm() {
   const [bankName, setBankName] = useState('');
   const [bankDescription, setBankDescription] = useState('');
   const [enabledRatio, setEnabledRatio] = useState(1.0);
+  const [hmaInstance, setHmaInstance] = useState<GQLHashBankHmaInstance>(
+    GQLHashBankHmaInstance.Default,
+  );
 
   const [selectedExchangeApi, setSelectedExchangeApi] = useState<string | null>(
     null,
@@ -246,6 +254,15 @@ export default function HashBankForm() {
     () => exchangeApisQuery.data?.exchangeApis ?? [],
     [exchangeApisQuery.data?.exchangeApis],
   );
+
+  const hmaInstancesQuery = useGQLHashBankHmaInstancesQuery({
+    skip: !isCreating,
+  });
+  const availableInstances = useMemo(
+    () => hmaInstancesQuery.data?.hashBankHmaInstances ?? [],
+    [hmaInstancesQuery.data?.hashBankHmaInstances],
+  );
+  const isClip = hmaInstance === GQLHashBankHmaInstance.Clip;
 
   const [fetchSchema, schemaQuery] = useGQLExchangeApiSchemaLazyQuery();
   const schema = schemaQuery.data?.exchangeApiSchema;
@@ -443,6 +460,7 @@ export default function HashBankForm() {
           name: bankName,
           description: bankDescription,
           enabled_ratio: enabledRatio,
+          hma_instance: hmaInstance,
           exchange: exchangeInput,
         },
       },
@@ -549,6 +567,13 @@ export default function HashBankForm() {
       <FormHeader
         title={isCreating ? 'Create Hash Bank' : 'Update Hash Bank'}
       />
+
+      {!isCreating && bank?.hma_instance === GQLHashBankHmaInstance.Clip && (
+        <div className="flex items-center gap-2 mb-6 text-sm text-zinc-600">
+          <Tag color="purple">{hashBankInstanceLabel(bank.hma_instance)}</Tag>
+          Matching type can&apos;t be changed after a bank is created.
+        </div>
+      )}
 
       {!isCreating && bank?.exchange && (
         <>
@@ -709,63 +734,81 @@ export default function HashBankForm() {
 
       {isCreating && (
         <>
-          <div className="flex flex-col justify-start">
-            <FormSectionHeader
-              title="Exchange Connection"
-              subtitle="Optionally connect this bank to a signal exchange to automatically receive shared threat intelligence data."
-            />
-            <Select
-              value={selectedExchangeApi ?? undefined}
-              placeholder="No exchange (standalone bank)"
-              allowClear
-              onChange={(val) => setSelectedExchangeApi(val ?? null)}
-              loading={exchangeApisQuery.loading}
-              className="max-w-md"
-              options={exchangeApis.map((api) => ({
-                label:
-                  EXCHANGE_DISPLAY_NAMES[api.name] ??
-                  api.name.replace(/_/g, ' '),
-                value: api.name,
-              }))}
-            />
-          </div>
-
-          {selectedExchangeApi && schemaLoading && (
-            <div className="flex items-center gap-2 mt-4 text-sm text-zinc-500">
-              <div className="w-4 h-4 border-2 rounded-full border-zinc-400 border-t-transparent animate-spin" />
-              Loading exchange configuration...
-            </div>
+          <HashBankInstanceSelect
+            available={availableInstances}
+            value={hmaInstance}
+            onChange={(instance) => {
+              setHmaInstance(instance);
+              if (instance === GQLHashBankHmaInstance.Clip) {
+                setSelectedExchangeApi(null);
+              }
+            }}
+          />
+          {availableInstances.includes(GQLHashBankHmaInstance.Clip) && (
+            <div className="mt-5 divider mb-9" />
           )}
 
-          {selectedExchangeApi && schema && !schemaLoading && (
+          {!isClip && (
             <>
-              {schema.config_schema.fields.length > 0 && (
-                <div className="mt-6">
-                  <DynamicSchemaFields
-                    title="Exchange Configuration"
-                    subtitle="Configure the exchange-specific settings for this connection."
-                    fields={schema.config_schema.fields}
-                    values={exchangeConfigValues}
-                    onChange={setExchangeConfigValues}
-                  />
+              <div className="flex flex-col justify-start">
+                <FormSectionHeader
+                  title="Exchange Connection"
+                  subtitle="Optionally connect this bank to a signal exchange to automatically receive shared threat intelligence data."
+                />
+                <Select
+                  value={selectedExchangeApi ?? undefined}
+                  placeholder="No exchange (standalone bank)"
+                  allowClear
+                  onChange={(val) => setSelectedExchangeApi(val ?? null)}
+                  loading={exchangeApisQuery.loading}
+                  className="max-w-md"
+                  options={exchangeApis.map((api) => ({
+                    label:
+                      EXCHANGE_DISPLAY_NAMES[api.name] ??
+                      api.name.replace(/_/g, ' '),
+                    value: api.name,
+                  }))}
+                />
+              </div>
+
+              {selectedExchangeApi && schemaLoading && (
+                <div className="flex items-center gap-2 mt-4 text-sm text-zinc-500">
+                  <div className="w-4 h-4 border-2 rounded-full border-zinc-400 border-t-transparent animate-spin" />
+                  Loading exchange configuration...
                 </div>
               )}
 
-              {schema.credentials_schema && (
-                <div className="mt-6">
-                  <DynamicSchemaFields
-                    title="Exchange Credentials"
-                    subtitle="Your organization's credentials for this exchange. They are used only by this bank and are never shown again after saving."
-                    fields={schema.credentials_schema.fields}
-                    values={exchangeCredValues}
-                    onChange={setExchangeCredValues}
-                  />
-                </div>
+              {selectedExchangeApi && schema && !schemaLoading && (
+                <>
+                  {schema.config_schema.fields.length > 0 && (
+                    <div className="mt-6">
+                      <DynamicSchemaFields
+                        title="Exchange Configuration"
+                        subtitle="Configure the exchange-specific settings for this connection."
+                        fields={schema.config_schema.fields}
+                        values={exchangeConfigValues}
+                        onChange={setExchangeConfigValues}
+                      />
+                    </div>
+                  )}
+
+                  {schema.credentials_schema && (
+                    <div className="mt-6">
+                      <DynamicSchemaFields
+                        title="Exchange Credentials"
+                        subtitle="Your organization's credentials for this exchange. They are used only by this bank and are never shown again after saving."
+                        fields={schema.credentials_schema.fields}
+                        values={exchangeCredValues}
+                        onChange={setExchangeCredValues}
+                      />
+                    </div>
+                  )}
+                </>
               )}
+
+              <div className="mt-5 divider mb-9" />
             </>
           )}
-
-          <div className="mt-5 divider mb-9" />
         </>
       )}
 

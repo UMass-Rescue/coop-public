@@ -8,8 +8,15 @@ export const HASH_BANKS_QUERY = gql`
       description
       hma_name
       enabled_ratio
+      hma_instance
       org_id
     }
+  }
+`;
+
+export const HASH_BANK_HMA_INSTANCES_QUERY = gql`
+  query HashBankHmaInstances {
+    hashBankHmaInstances
   }
 `;
 
@@ -21,6 +28,7 @@ export const HASH_BANK_BY_ID_QUERY = gql`
       description
       hma_name
       enabled_ratio
+      hma_instance
       org_id
       exchange {
         api
