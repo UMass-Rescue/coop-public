@@ -255,8 +255,11 @@ export default function HashBankForm() {
     [exchangeApisQuery.data?.exchangeApis],
   );
 
+  // Which instances are offered changes when an org flips its CLIP setting,
+  // so never serve this from the cache.
   const hmaInstancesQuery = useGQLHashBankHmaInstancesQuery({
     skip: !isCreating,
+    fetchPolicy: 'network-only',
   });
   const availableInstances = useMemo(
     () => hmaInstancesQuery.data?.hashBankHmaInstances ?? [],

@@ -3,6 +3,7 @@ import {
   Building2,
   Gavel,
   Heart,
+  Image as ImageIcon,
   KeyRound,
   Settings2,
   UsersRound,
@@ -13,7 +14,12 @@ import { useSearchParams } from 'react-router';
 
 import DashboardHeader from '../dashboard/components/DashboardHeader';
 
+import {
+  GQLUserPermission,
+  useGQLImageMatchingAvailabilityQuery,
+} from '../../graphql/generated';
 import AppealsTab from './tabs/AppealsTab';
+import ImageMatchingTab from './tabs/ImageMatchingTab';
 import OrganizationTab from './tabs/OrganizationTab';
 import PartialItemsTab from './tabs/PartialItemsTab';
 import ReviewConsoleTab from './tabs/ReviewConsoleTab';
@@ -21,6 +27,17 @@ import SSOTab from './tabs/SSOTab';
 import WellnessTab from './tabs/WellnessTab';
 
 gql`
+  query ImageMatchingAvailability {
+    me {
+      id
+      permissions
+    }
+    myOrg {
+      id
+      clipHashingAvailable
+    }
+  }
+
   query DeploymentSettings {
     me {
       id
@@ -100,7 +117,8 @@ type Tab =
   | 'appeals'
   | 'review-console'
   | 'wellness'
-  | 'partial-items';
+  | 'partial-items'
+  | 'image-matching';
 
 const TABS: { value: Tab; label: string; icon: React.ReactNode }[] = [
   {
@@ -121,6 +139,11 @@ const TABS: { value: Tab; label: string; icon: React.ReactNode }[] = [
     label: 'Partial Items',
     icon: <Settings2 size={16} />,
   },
+  {
+    value: 'image-matching',
+    label: 'Image Matching',
+    icon: <ImageIcon size={16} />,
+  },
 ];
 
 // Tab values that have been renamed. Old links (bookmarks, docs, shared URLs)
@@ -132,13 +155,34 @@ const LEGACY_TAB_ALIASES: Record<string, Tab | undefined> = {
 const isTab = (value: string): value is Tab =>
   TABS.some((tab) => tab.value === value);
 
+// Image Matching only exists when the deployment has the optional CLIP
+// instance, and only org admins can change it.
+const IMAGE_MATCHING_TAB: Tab = 'image-matching';
+
 export default function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get('tab');
   const aliasedTab = tabParam ? LEGACY_TAB_ALIASES[tabParam] : undefined;
   const resolvedTab = aliasedTab ?? tabParam;
+  const availability = useGQLImageMatchingAvailabilityQuery();
+  const showImageMatching =
+    availability.data?.myOrg?.clipHashingAvailable === true &&
+    availability.data.me?.permissions.includes(GQLUserPermission.ManageOrg) ===
+      true;
+  const tabs = TABS.filter(
+    (tab) => tab.value !== IMAGE_MATCHING_TAB || showImageMatching,
+  );
+
+  // A direct link to the Image Matching tab waits for the availability check
+  // instead of flashing the Organization tab first.
+  const awaitingAvailability =
+    availability.loading && resolvedTab === IMAGE_MATCHING_TAB;
   const activeTab: Tab =
-    resolvedTab && isTab(resolvedTab) ? resolvedTab : 'organization';
+    resolvedTab &&
+    isTab(resolvedTab) &&
+    (awaitingAvailability || tabs.some((tab) => tab.value === resolvedTab))
+      ? resolvedTab
+      : 'organization';
 
   // Rewrite a legacy `?tab=` value to its current one in place, so that
   // anything saved from here on — a re-bookmark, a copied link — carries the
@@ -178,7 +222,7 @@ export default function SettingsPage() {
         />
 
         <nav className="flex border-b border-gray-200 mb-4" role="tablist">
-          {TABS.map((tab) => (
+          {tabs.map((tab) => (
             <button
               key={tab.value}
               role="tab"
@@ -202,6 +246,9 @@ export default function SettingsPage() {
         {activeTab === 'review-console' && <ReviewConsoleTab />}
         {activeTab === 'wellness' && <WellnessTab />}
         {activeTab === 'partial-items' && <PartialItemsTab />}
+        {activeTab === 'image-matching' && showImageMatching && (
+          <ImageMatchingTab />
+        )}
       </div>
     </>
   );

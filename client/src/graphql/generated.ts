@@ -25389,6 +25389,24 @@ export type GQLRenameRoleMutation = {
   };
 };
 
+export type GQLImageMatchingAvailabilityQueryVariables = Exact<{
+  [key: string]: never;
+}>;
+
+export type GQLImageMatchingAvailabilityQuery = {
+  readonly __typename: 'Query';
+  readonly me?: {
+    readonly __typename: 'User';
+    readonly id: string;
+    readonly permissions: ReadonlyArray<GQLUserPermission>;
+  } | null;
+  readonly myOrg?: {
+    readonly __typename: 'Org';
+    readonly id: string;
+    readonly clipHashingAvailable: boolean;
+  } | null;
+};
+
 export type GQLDeploymentSettingsQueryVariables = Exact<{
   [key: string]: never;
 }>;
@@ -25546,6 +25564,28 @@ export type GQLUpdateAppealSettingsMutation = {
     readonly appealsCallbackHeaders?: JsonObject | null;
     readonly appealsCallbackBody?: JsonObject | null;
   };
+};
+
+export type GQLImageMatchingSettingsQueryVariables = Exact<{
+  [key: string]: never;
+}>;
+
+export type GQLImageMatchingSettingsQuery = {
+  readonly __typename: 'Query';
+  readonly myOrg?: {
+    readonly __typename: 'Org';
+    readonly id: string;
+    readonly hasClipHashingEnabled: boolean;
+  } | null;
+};
+
+export type GQLUpdateHasClipHashingEnabledMutationVariables = Exact<{
+  enabled: Scalars['Boolean']['input'];
+}>;
+
+export type GQLUpdateHasClipHashingEnabledMutation = {
+  readonly __typename: 'Mutation';
+  readonly updateHasClipHashingEnabled: boolean;
 };
 
 export type GQLOrgSettingsQueryVariables = Exact<{ [key: string]: never }>;
@@ -45040,6 +45080,109 @@ export type GQLRenameRoleMutationOptions = Apollo.BaseMutationOptions<
   GQLRenameRoleMutation,
   GQLRenameRoleMutationVariables
 >;
+export const GQLImageMatchingAvailabilityDocument = gql`
+  query ImageMatchingAvailability {
+    me {
+      id
+      permissions
+    }
+    myOrg {
+      id
+      clipHashingAvailable
+    }
+  }
+`;
+
+/**
+ * __useGQLImageMatchingAvailabilityQuery__
+ *
+ * To run a query within a React component, call `useGQLImageMatchingAvailabilityQuery` and pass it any options that fit your needs.
+ * When your component renders, `useGQLImageMatchingAvailabilityQuery` returns an object from Apollo Client that contains loading, error, and data properties
+ * you can use to render your UI.
+ *
+ * @param baseOptions options that will be passed into the query, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options;
+ *
+ * @example
+ * const { data, loading, error } = useGQLImageMatchingAvailabilityQuery({
+ *   variables: {
+ *   },
+ * });
+ */
+export function useGQLImageMatchingAvailabilityQuery(
+  baseOptions?: Apollo.QueryHookOptions<
+    GQLImageMatchingAvailabilityQuery,
+    GQLImageMatchingAvailabilityQueryVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return Apollo.useQuery<
+    GQLImageMatchingAvailabilityQuery,
+    GQLImageMatchingAvailabilityQueryVariables
+  >(GQLImageMatchingAvailabilityDocument, options);
+}
+export function useGQLImageMatchingAvailabilityLazyQuery(
+  baseOptions?: Apollo.LazyQueryHookOptions<
+    GQLImageMatchingAvailabilityQuery,
+    GQLImageMatchingAvailabilityQueryVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return Apollo.useLazyQuery<
+    GQLImageMatchingAvailabilityQuery,
+    GQLImageMatchingAvailabilityQueryVariables
+  >(GQLImageMatchingAvailabilityDocument, options);
+}
+// @ts-ignore
+export function useGQLImageMatchingAvailabilitySuspenseQuery(
+  baseOptions?: Apollo.SuspenseQueryHookOptions<
+    GQLImageMatchingAvailabilityQuery,
+    GQLImageMatchingAvailabilityQueryVariables
+  >,
+): Apollo.UseSuspenseQueryResult<
+  GQLImageMatchingAvailabilityQuery,
+  GQLImageMatchingAvailabilityQueryVariables
+>;
+export function useGQLImageMatchingAvailabilitySuspenseQuery(
+  baseOptions?:
+    | Apollo.SkipToken
+    | Apollo.SuspenseQueryHookOptions<
+        GQLImageMatchingAvailabilityQuery,
+        GQLImageMatchingAvailabilityQueryVariables
+      >,
+): Apollo.UseSuspenseQueryResult<
+  GQLImageMatchingAvailabilityQuery | undefined,
+  GQLImageMatchingAvailabilityQueryVariables
+>;
+export function useGQLImageMatchingAvailabilitySuspenseQuery(
+  baseOptions?:
+    | Apollo.SkipToken
+    | Apollo.SuspenseQueryHookOptions<
+        GQLImageMatchingAvailabilityQuery,
+        GQLImageMatchingAvailabilityQueryVariables
+      >,
+) {
+  const options =
+    baseOptions === Apollo.skipToken
+      ? baseOptions
+      : { ...defaultOptions, ...baseOptions };
+  return Apollo.useSuspenseQuery<
+    GQLImageMatchingAvailabilityQuery,
+    GQLImageMatchingAvailabilityQueryVariables
+  >(GQLImageMatchingAvailabilityDocument, options);
+}
+export type GQLImageMatchingAvailabilityQueryHookResult = ReturnType<
+  typeof useGQLImageMatchingAvailabilityQuery
+>;
+export type GQLImageMatchingAvailabilityLazyQueryHookResult = ReturnType<
+  typeof useGQLImageMatchingAvailabilityLazyQuery
+>;
+export type GQLImageMatchingAvailabilitySuspenseQueryHookResult = ReturnType<
+  typeof useGQLImageMatchingAvailabilitySuspenseQuery
+>;
+export type GQLImageMatchingAvailabilityQueryResult = Apollo.QueryResult<
+  GQLImageMatchingAvailabilityQuery,
+  GQLImageMatchingAvailabilityQueryVariables
+>;
 export const GQLDeploymentSettingsDocument = gql`
   query DeploymentSettings {
     me {
@@ -45763,6 +45906,154 @@ export type GQLUpdateAppealSettingsMutationOptions = Apollo.BaseMutationOptions<
   GQLUpdateAppealSettingsMutation,
   GQLUpdateAppealSettingsMutationVariables
 >;
+export const GQLImageMatchingSettingsDocument = gql`
+  query ImageMatchingSettings {
+    myOrg {
+      id
+      hasClipHashingEnabled
+    }
+  }
+`;
+
+/**
+ * __useGQLImageMatchingSettingsQuery__
+ *
+ * To run a query within a React component, call `useGQLImageMatchingSettingsQuery` and pass it any options that fit your needs.
+ * When your component renders, `useGQLImageMatchingSettingsQuery` returns an object from Apollo Client that contains loading, error, and data properties
+ * you can use to render your UI.
+ *
+ * @param baseOptions options that will be passed into the query, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options;
+ *
+ * @example
+ * const { data, loading, error } = useGQLImageMatchingSettingsQuery({
+ *   variables: {
+ *   },
+ * });
+ */
+export function useGQLImageMatchingSettingsQuery(
+  baseOptions?: Apollo.QueryHookOptions<
+    GQLImageMatchingSettingsQuery,
+    GQLImageMatchingSettingsQueryVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return Apollo.useQuery<
+    GQLImageMatchingSettingsQuery,
+    GQLImageMatchingSettingsQueryVariables
+  >(GQLImageMatchingSettingsDocument, options);
+}
+export function useGQLImageMatchingSettingsLazyQuery(
+  baseOptions?: Apollo.LazyQueryHookOptions<
+    GQLImageMatchingSettingsQuery,
+    GQLImageMatchingSettingsQueryVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return Apollo.useLazyQuery<
+    GQLImageMatchingSettingsQuery,
+    GQLImageMatchingSettingsQueryVariables
+  >(GQLImageMatchingSettingsDocument, options);
+}
+// @ts-ignore
+export function useGQLImageMatchingSettingsSuspenseQuery(
+  baseOptions?: Apollo.SuspenseQueryHookOptions<
+    GQLImageMatchingSettingsQuery,
+    GQLImageMatchingSettingsQueryVariables
+  >,
+): Apollo.UseSuspenseQueryResult<
+  GQLImageMatchingSettingsQuery,
+  GQLImageMatchingSettingsQueryVariables
+>;
+export function useGQLImageMatchingSettingsSuspenseQuery(
+  baseOptions?:
+    | Apollo.SkipToken
+    | Apollo.SuspenseQueryHookOptions<
+        GQLImageMatchingSettingsQuery,
+        GQLImageMatchingSettingsQueryVariables
+      >,
+): Apollo.UseSuspenseQueryResult<
+  GQLImageMatchingSettingsQuery | undefined,
+  GQLImageMatchingSettingsQueryVariables
+>;
+export function useGQLImageMatchingSettingsSuspenseQuery(
+  baseOptions?:
+    | Apollo.SkipToken
+    | Apollo.SuspenseQueryHookOptions<
+        GQLImageMatchingSettingsQuery,
+        GQLImageMatchingSettingsQueryVariables
+      >,
+) {
+  const options =
+    baseOptions === Apollo.skipToken
+      ? baseOptions
+      : { ...defaultOptions, ...baseOptions };
+  return Apollo.useSuspenseQuery<
+    GQLImageMatchingSettingsQuery,
+    GQLImageMatchingSettingsQueryVariables
+  >(GQLImageMatchingSettingsDocument, options);
+}
+export type GQLImageMatchingSettingsQueryHookResult = ReturnType<
+  typeof useGQLImageMatchingSettingsQuery
+>;
+export type GQLImageMatchingSettingsLazyQueryHookResult = ReturnType<
+  typeof useGQLImageMatchingSettingsLazyQuery
+>;
+export type GQLImageMatchingSettingsSuspenseQueryHookResult = ReturnType<
+  typeof useGQLImageMatchingSettingsSuspenseQuery
+>;
+export type GQLImageMatchingSettingsQueryResult = Apollo.QueryResult<
+  GQLImageMatchingSettingsQuery,
+  GQLImageMatchingSettingsQueryVariables
+>;
+export const GQLUpdateHasClipHashingEnabledDocument = gql`
+  mutation UpdateHasClipHashingEnabled($enabled: Boolean!) {
+    updateHasClipHashingEnabled(enabled: $enabled)
+  }
+`;
+export type GQLUpdateHasClipHashingEnabledMutationFn = Apollo.MutationFunction<
+  GQLUpdateHasClipHashingEnabledMutation,
+  GQLUpdateHasClipHashingEnabledMutationVariables
+>;
+
+/**
+ * __useGQLUpdateHasClipHashingEnabledMutation__
+ *
+ * To run a mutation, you first call `useGQLUpdateHasClipHashingEnabledMutation` within a React component and pass it any options that fit your needs.
+ * When your component renders, `useGQLUpdateHasClipHashingEnabledMutation` returns a tuple that includes:
+ * - A mutate function that you can call at any time to execute the mutation
+ * - An object with fields that represent the current status of the mutation's execution
+ *
+ * @param baseOptions options that will be passed into the mutation, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options-2;
+ *
+ * @example
+ * const [gqlUpdateHasClipHashingEnabledMutation, { data, loading, error }] = useGQLUpdateHasClipHashingEnabledMutation({
+ *   variables: {
+ *      enabled: // value for 'enabled'
+ *   },
+ * });
+ */
+export function useGQLUpdateHasClipHashingEnabledMutation(
+  baseOptions?: Apollo.MutationHookOptions<
+    GQLUpdateHasClipHashingEnabledMutation,
+    GQLUpdateHasClipHashingEnabledMutationVariables
+  >,
+) {
+  const options = { ...defaultOptions, ...baseOptions };
+  return Apollo.useMutation<
+    GQLUpdateHasClipHashingEnabledMutation,
+    GQLUpdateHasClipHashingEnabledMutationVariables
+  >(GQLUpdateHasClipHashingEnabledDocument, options);
+}
+export type GQLUpdateHasClipHashingEnabledMutationHookResult = ReturnType<
+  typeof useGQLUpdateHasClipHashingEnabledMutation
+>;
+export type GQLUpdateHasClipHashingEnabledMutationResult =
+  Apollo.MutationResult<GQLUpdateHasClipHashingEnabledMutation>;
+export type GQLUpdateHasClipHashingEnabledMutationOptions =
+  Apollo.BaseMutationOptions<
+    GQLUpdateHasClipHashingEnabledMutation,
+    GQLUpdateHasClipHashingEnabledMutationVariables
+  >;
 export const GQLOrgSettingsDocument = gql`
   query OrgSettings {
     myOrg {
@@ -46309,7 +46600,9 @@ export const namedOperations = {
     HasNcmecReportingEnabled: 'HasNcmecReportingEnabled',
     NcmecOrgSettings: 'NcmecOrgSettings',
     PermissionGroups: 'PermissionGroups',
+    ImageMatchingAvailability: 'ImageMatchingAvailability',
     DeploymentSettings: 'DeploymentSettings',
+    ImageMatchingSettings: 'ImageMatchingSettings',
     OrgSettings: 'OrgSettings',
     OrgDefaultSafetySettings: 'OrgDefaultSafetySettings',
   },
@@ -46405,6 +46698,7 @@ export const namedOperations = {
     UpdateIgnoreCallbackUrl: 'UpdateIgnoreCallbackUrl',
     SetJobPriorityWeights: 'SetJobPriorityWeights',
     UpdateAppealSettings: 'UpdateAppealSettings',
+    UpdateHasClipHashingEnabled: 'UpdateHasClipHashingEnabled',
     UpdateOrgInfo: 'UpdateOrgInfo',
     UpdatePartialItemsSettings: 'UpdatePartialItemsSettings',
     UpdateSSOCredentials: 'UpdateSSOCredentials',
