@@ -2728,6 +2728,7 @@ export type GQLMutation = {
   /** @deprecated Field no longer supported */
   readonly updateExchangeCredentials: Scalars['Boolean']['output'];
   readonly updateHasAppealsEnabled: Scalars['Boolean']['output'];
+  readonly updateHasClipHashingEnabled: Scalars['Boolean']['output'];
   readonly updateHasReportingRulesEnabled: Scalars['Boolean']['output'];
   readonly updateHashBank: GQLMutateHashBankResponse;
   readonly updateHashBankExchangeCredentials: GQLExchangeCredentialStatus;
@@ -3035,6 +3036,10 @@ export type GQLMutationUpdateExchangeCredentialsArgs = {
 };
 
 export type GQLMutationUpdateHasAppealsEnabledArgs = {
+  enabled: Scalars['Boolean']['input'];
+};
+
+export type GQLMutationUpdateHasClipHashingEnabledArgs = {
   enabled: Scalars['Boolean']['input'];
 };
 
@@ -3426,6 +3431,8 @@ export type GQLOrg = {
   readonly apiKey: Scalars['String']['output'];
   readonly appealsRoutingRules: ReadonlyArray<GQLRoutingRule>;
   readonly banks?: Maybe<GQLMatchingBanks>;
+  /** Whether this deployment has the optional CLIP instance, so the setting can be turned on. */
+  readonly clipHashingAvailable: Scalars['Boolean']['output'];
   readonly contentTypes: ReadonlyArray<GQLContentType>;
   readonly defaultInterfacePreferences: GQLUserInterfacePreferences;
   readonly email: Scalars['String']['output'];
@@ -3436,6 +3443,8 @@ export type GQLOrg = {
    */
   readonly failedNcmecSubmissions: ReadonlyArray<GQLNcmecFailedSubmission>;
   readonly hasAppealsEnabled: Scalars['Boolean']['output'];
+  /** Whether this org hashes images with CLIP and can use CLIP hash banks. */
+  readonly hasClipHashingEnabled: Scalars['Boolean']['output'];
   readonly hasNCMECReportingEnabled: Scalars['Boolean']['output'];
   readonly hasPartialItemsEndpoint: Scalars['Boolean']['output'];
   readonly hasReportingRulesEnabled: Scalars['Boolean']['output'];
@@ -3681,8 +3690,8 @@ export type GQLQuery = {
   readonly hashBank?: Maybe<GQLHashBank>;
   readonly hashBankById?: Maybe<GQLHashBank>;
   /**
-   * The HMA instances this deployment can create banks on. CLIP is listed only
-   * when the optional CLIP instance is configured.
+   * The HMA instances the signed-in org can create banks on. CLIP is listed only
+   * when the deployment has the CLIP instance and the org has turned CLIP on.
    */
   readonly hashBankHmaInstances: ReadonlyArray<GQLHashBankHmaInstance>;
   readonly hashBanks: ReadonlyArray<GQLHashBank>;
@@ -11761,6 +11770,12 @@ export type GQLMutationResolvers<
     ContextType,
     RequireFields<GQLMutationUpdateHasAppealsEnabledArgs, 'enabled'>
   >;
+  updateHasClipHashingEnabled?: Resolver<
+    GQLResolversTypes['Boolean'],
+    ParentType,
+    ContextType,
+    RequireFields<GQLMutationUpdateHasClipHashingEnabledArgs, 'enabled'>
+  >;
   updateHasReportingRulesEnabled?: Resolver<
     GQLResolversTypes['Boolean'],
     ParentType,
@@ -12331,6 +12346,11 @@ export type GQLOrgResolvers<
     ParentType,
     ContextType
   >;
+  clipHashingAvailable?: Resolver<
+    GQLResolversTypes['Boolean'],
+    ParentType,
+    ContextType
+  >;
   contentTypes?: Resolver<
     ReadonlyArray<GQLResolversTypes['ContentType']>,
     ParentType,
@@ -12348,6 +12368,11 @@ export type GQLOrgResolvers<
     ContextType
   >;
   hasAppealsEnabled?: Resolver<
+    GQLResolversTypes['Boolean'],
+    ParentType,
+    ContextType
+  >;
+  hasClipHashingEnabled?: Resolver<
     GQLResolversTypes['Boolean'],
     ParentType,
     ContextType

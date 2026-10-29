@@ -393,4 +393,124 @@ describe('Org resolvers', () => {
       });
     });
   });
+
+  describe('CLIP hashing setting', () => {
+    function makeCtx(opts: {
+      permissions?: readonly UserPermission[];
+      clipDeployed: boolean;
+      callerOrgId?: string;
+      signedIn?: boolean;
+    }) {
+      const updateHasClipHashingEnabled = vi.fn(async () => undefined);
+      const hasClipHashingEnabled = vi.fn(async () => true);
+      const ctx = {
+        getUser: () =>
+          opts.signedIn === false
+            ? null
+            : {
+                id: 'user-1',
+                orgId: opts.callerOrgId ?? 'org-1',
+                getPermissions: () => opts.permissions ?? [],
+              },
+        services: {
+          OrgSettingsService: {
+            updateHasClipHashingEnabled,
+            hasClipHashingEnabled,
+          },
+          HMAHashBankService: { isClipEnabled: () => opts.clipDeployed },
+        },
+      };
+      return { ctx, updateHasClipHashingEnabled, hasClipHashingEnabled };
+    }
+
+    const update = (
+      resolvers.Mutation as Record<
+        'updateHasClipHashingEnabled',
+        (
+          parent: unknown,
+          args: { enabled: boolean },
+          ctx: unknown,
+        ) => Promise<boolean>
+      >
+    ).updateHasClipHashingEnabled;
+    const Org = resolvers.Org as Record<
+      'hasClipHashingEnabled' | 'clipHashingAvailable',
+      (parent: { id: string }, args: unknown, ctx: unknown) => Promise<unknown>
+    >;
+
+    it('lets an org admin turn it on when CLIP is deployed', async () => {
+      const { ctx, updateHasClipHashingEnabled } = makeCtx({
+        permissions: [UserPermission.MANAGE_ORG],
+        clipDeployed: true,
+      });
+      await expect(update({}, { enabled: true }, ctx)).resolves.toBe(true);
+      expect(updateHasClipHashingEnabled).toHaveBeenCalledWith({
+        orgId: 'org-1',
+        enabled: true,
+      });
+    });
+
+    it('refuses a user without MANAGE_ORG, and writes nothing', async () => {
+      const { ctx, updateHasClipHashingEnabled } = makeCtx({
+        permissions: [UserPermission.VIEW_MRT],
+        clipDeployed: true,
+      });
+      await expect(update({}, { enabled: true }, ctx)).rejects.toThrow(
+        'User does not have permission to update org settings',
+      );
+      expect(updateHasClipHashingEnabled).not.toHaveBeenCalled();
+    });
+
+    it('refuses an unauthenticated caller, and writes nothing', async () => {
+      const { ctx, updateHasClipHashingEnabled } = makeCtx({
+        signedIn: false,
+        clipDeployed: true,
+      });
+      await expect(update({}, { enabled: true }, ctx)).rejects.toThrow(
+        'User required.',
+      );
+      expect(updateHasClipHashingEnabled).not.toHaveBeenCalled();
+    });
+
+    it('refuses to turn it on when the deployment has no CLIP instance', async () => {
+      const { ctx, updateHasClipHashingEnabled } = makeCtx({
+        permissions: [UserPermission.MANAGE_ORG],
+        clipDeployed: false,
+      });
+      await expect(update({}, { enabled: true }, ctx)).rejects.toThrow(
+        'CLIP is not available',
+      );
+      expect(updateHasClipHashingEnabled).not.toHaveBeenCalled();
+    });
+
+    it('still lets an org turn it off after CLIP is removed from the deployment', async () => {
+      const { ctx, updateHasClipHashingEnabled } = makeCtx({
+        permissions: [UserPermission.MANAGE_ORG],
+        clipDeployed: false,
+      });
+      await expect(update({}, { enabled: false }, ctx)).resolves.toBe(true);
+      expect(updateHasClipHashingEnabled).toHaveBeenCalledWith({
+        orgId: 'org-1',
+        enabled: false,
+      });
+    });
+
+    it('exposes the org setting and the deployment flag to org members only', async () => {
+      const { ctx } = makeCtx({ clipDeployed: true });
+      await expect(
+        Org.hasClipHashingEnabled({ id: 'org-1' }, {}, ctx),
+      ).resolves.toBe(true);
+      await expect(
+        Org.clipHashingAvailable({ id: 'org-1' }, {}, ctx),
+      ).resolves.toBe(true);
+
+      const other = makeCtx({ clipDeployed: true, callerOrgId: 'org-2' }).ctx;
+      await expect(
+        Org.hasClipHashingEnabled({ id: 'org-1' }, {}, other),
+      ).rejects.toThrow('User required.');
+      await expect(
+        Org.clipHashingAvailable({ id: 'org-1' }, {}, other),
+      ).rejects.toThrow('User required.');
+    });
+  });
 });

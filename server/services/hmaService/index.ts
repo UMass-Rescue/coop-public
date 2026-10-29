@@ -7,6 +7,7 @@ import { inject } from '../../iocContainer/utils.js';
 import { jsonStringify } from '../../utils/encoding.js';
 import { isUniqueViolationError } from '../../utils/kysely.js';
 import { makeMatchingBankNameExistsError } from '../moderationConfigService/modules/MatchingBankOperations.js';
+import { type OrgSettingsService } from '../orgSettingsService/orgSettingsService.js';
 import type { HashBank, HmaInstance } from './dbTypes.js';
 import { HashBankUserError, HmaRequestError } from './errors.js';
 import { HashBankService } from './hashBankService.js';
@@ -278,6 +279,10 @@ export class HmaService {
     private readonly fetchHTTP: Dependencies['fetchHTTP'],
     kyselyPg: Dependencies['KyselyPg'],
     private readonly tracer: Dependencies['Tracer'],
+    private readonly orgSettings: Pick<
+      OrgSettingsService,
+      'hasClipHashingEnabled'
+    >,
   ) {
     this.hmaServiceUrl =
       process.env.HMA_SERVICE_URL ?? 'http://localhost:9876/';
@@ -363,6 +368,12 @@ export class HmaService {
       if (!this.isClipEnabled()) {
         throw new HashBankUserError(
           'CLIP is not available: this deployment has no CLIP HMA instance.',
+        );
+      }
+      // Checked apart from isClipAvailableToOrg to give a separate message.
+      if (!(await this.orgSettings.hasClipHashingEnabled(orgId))) {
+        throw new HashBankUserError(
+          'CLIP is turned off for your organization. Turn it on under Settings, Image Matching.',
         );
       }
       if (exchange) {
@@ -505,7 +516,7 @@ export class HmaService {
     if (!bank) {
       throw new Error('Bank not found');
     }
-    this.assertUsable(bank);
+    await this.assertUsable(bank);
 
     const newName =
       updates.name != null && updates.name !== bank.name
@@ -631,7 +642,7 @@ export class HmaService {
     if (!bank) {
       throw new Error('Bank not found');
     }
-    this.assertUsable(bank);
+    await this.assertUsable(bank);
 
     // DELETE /c/bank on an exchange-backed bank leaves the exchange and its
     // credentials in HMA, so those must go through DELETE /c/exchange.
@@ -693,8 +704,7 @@ export class HmaService {
     // Get local bank
     const bank = await this.hashBankService.findByName(name, orgId);
 
-    // CLIP banks are hidden, not deleted, while the CLIP instance is not deployed.
-    if (!bank || !this.isUsable(bank)) {
+    if (!bank || !(await this.isUsable(bank))) {
       return null;
     }
 
@@ -760,8 +770,7 @@ export class HmaService {
     // Get local bank by ID
     const bank = await this.hashBankService.findById(id, orgId);
 
-    // CLIP banks are hidden, not deleted, while the CLIP instance is not deployed.
-    if (!bank || !this.isUsable(bank)) {
+    if (!bank || !(await this.isUsable(bank))) {
       return null;
     }
 
@@ -795,8 +804,19 @@ export class HmaService {
   async listBanks(orgId: string): Promise<HashBank[]> {
     try {
       // Get all local banks for org
-      const banks = (await this.hashBankService.findAllByOrgId(orgId)).filter(
-        (bank) => this.isUsable(bank),
+      const allBanks = await this.hashBankService.findAllByOrgId(orgId);
+      // One settings read per call, and none for orgs without CLIP banks. If
+      // the read fails, hide only the CLIP banks rather than losing every bank.
+      const clipAvailable = allBanks.some(
+        (bank) => bank.hma_instance === 'CLIP',
+      )
+        ? await this.isClipAvailableToOrg(orgId).catch((error: unknown) => {
+            this.tracer.logActiveSpanFailedIfAny(error);
+            return false;
+          })
+        : false;
+      const banks = allBanks.filter(
+        (bank) => bank.hma_instance !== 'CLIP' || clipAvailable,
       );
 
       // Filter out banks that don't exist in HMA service
@@ -1107,8 +1127,21 @@ export class HmaService {
     return response.body as unknown as Record<string, string>;
   }
 
+  /** Whether this deployment has the optional CLIP instance, for any org. */
   isClipEnabled(): boolean {
     return this.clipServiceUrl != null;
+  }
+
+  /**
+   * Whether CLIP is on for an org: the deployment has the CLIP instance and the
+   * org has turned CLIP hashing on. This single check decides whether the org
+   * can see and use CLIP banks.
+   */
+  async isClipAvailableToOrg(orgId: string): Promise<boolean> {
+    return (
+      this.isClipEnabled() &&
+      (await this.orgSettings.hasClipHashingEnabled(orgId))
+    );
   }
 
   private requireClipUrl(): string {
@@ -1122,15 +1155,18 @@ export class HmaService {
     return instance === 'CLIP' ? this.requireClipUrl() : this.hmaServiceUrl;
   }
 
-  /** CLIP banks exist only while the CLIP instance is deployed. */
-  private isUsable(bank: HashBank): boolean {
-    return bank.hma_instance !== 'CLIP' || this.isClipEnabled();
+  /** CLIP banks are hidden, not deleted, while CLIP is off for their org. */
+  private async isUsable(bank: HashBank): Promise<boolean> {
+    return (
+      bank.hma_instance !== 'CLIP' ||
+      (await this.isClipAvailableToOrg(bank.org_id))
+    );
   }
 
-  private assertUsable(bank: HashBank): void {
-    if (!this.isUsable(bank)) {
+  private async assertUsable(bank: HashBank): Promise<void> {
+    if (!(await this.isUsable(bank))) {
       throw new HashBankUserError(
-        'This bank is on the CLIP instance, which is not available on this deployment.',
+        'This bank uses CLIP, which is not turned on for your organization.',
       );
     }
   }
@@ -1355,4 +1391,7 @@ export class HmaService {
   }
 }
 
-export default inject(['fetchHTTP', 'KyselyPg', 'Tracer'], HmaService);
+export default inject(
+  ['fetchHTTP', 'KyselyPg', 'Tracer', 'OrgSettingsService'],
+  HmaService,
+);

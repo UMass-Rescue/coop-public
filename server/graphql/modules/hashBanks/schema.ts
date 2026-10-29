@@ -105,8 +105,8 @@ export const typeDefs = /* GraphQL */ `
     hashBank(name: String!): HashBank
     hashBankById(id: ID!): HashBank
     """
-    The HMA instances this deployment can create banks on. CLIP is listed only
-    when the optional CLIP instance is configured.
+    The HMA instances the signed-in org can create banks on. CLIP is listed only
+    when the deployment has the CLIP instance and the org has turned CLIP on.
     """
     hashBankHmaInstances: [HashBankHmaInstance!]!
     exchangeApis: [ExchangeApiInfo!]!

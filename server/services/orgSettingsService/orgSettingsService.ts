@@ -11,6 +11,7 @@ export type OrgSettingsPg = {
     org_id: string;
     has_reporting_rules_enabled: boolean;
     has_appeals_enabled: boolean;
+    has_clip_hashing_enabled: boolean;
     appeal_callback_url: string | null;
     appeal_callback_headers: JsonObject | null;
     appeal_callback_body: JsonObject | null;
@@ -62,6 +63,7 @@ function makeOrgSettingsService(pgQuery: Kysely<OrgSettingsPg>) {
         org_id: orgId,
         has_reporting_rules_enabled: false,
         has_appeals_enabled: false,
+        has_clip_hashing_enabled: false,
         allow_multiple_policies_per_action: false,
         user_strike_ttl_days: 90,
         is_demo_org: false,
@@ -100,6 +102,14 @@ function makeOrgSettingsService(pgQuery: Kysely<OrgSettingsPg>) {
         .where('org_id', '=', orgId)
         .executeTakeFirst();
       return rows?.has_appeals_enabled ?? false;
+    },
+    async hasClipHashingEnabled(orgId: string) {
+      const rows = await pgQuery
+        .selectFrom('public.org_settings')
+        .select(['has_clip_hashing_enabled'])
+        .where('org_id', '=', orgId)
+        .executeTakeFirst();
+      return rows?.has_clip_hashing_enabled ?? false;
     },
     async allowMultiplePoliciesPerAction(orgId: string) {
       const rows = await pgQuery
@@ -228,6 +238,17 @@ function makeOrgSettingsService(pgQuery: Kysely<OrgSettingsPg>) {
         .updateTable('public.org_settings')
         .where('org_id', '=', input.orgId)
         .set({ has_appeals_enabled: input.enabled })
+        .execute();
+    },
+    async updateHasClipHashingEnabled(input: {
+      orgId: string;
+      enabled: boolean;
+    }) {
+      await ensureOrgSettingsRow(input.orgId);
+      await pgQuery
+        .updateTable('public.org_settings')
+        .where('org_id', '=', input.orgId)
+        .set({ has_clip_hashing_enabled: input.enabled })
         .execute();
     },
     async updateHasReportingRulesEnabled(input: {

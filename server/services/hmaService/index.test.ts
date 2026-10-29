@@ -138,10 +138,18 @@ function makeTracer() {
   };
 }
 
+/** Org settings stand-in; `clipHashingEnabled` is the org's CLIP toggle. */
+function makeOrgSettings(clipHashingEnabled = true) {
+  return {
+    hasClipHashingEnabled: vi.fn().mockResolvedValue(clipHashingEnabled),
+  };
+}
+
 function makeService(
   fetchHTTP: Mock,
   opts: MockDbOpts & {
     tracer?: ReturnType<typeof makeTracer>;
+    orgSettings?: ReturnType<typeof makeOrgSettings>;
     mockDb?: ReturnType<typeof makeMockKyselyPg>;
   } = {},
 ): HmaService {
@@ -149,6 +157,7 @@ function makeService(
     fetchHTTP as never,
     (opts.mockDb ?? makeMockKyselyPg(opts)).db,
     opts.tracer ?? makeTracer(),
+    opts.orgSettings ?? makeOrgSettings(),
   );
 }
 
@@ -475,7 +484,12 @@ describe('HmaService', () => {
         'DELETE /c/exchange/COOP_ORG1_MY_BANK': ok({}),
       });
       const { db, deleteFrom } = makeMockKyselyPg();
-      const svc = new HmaService(fetchHTTP as never, db, makeTracer());
+      const svc = new HmaService(
+        fetchHTTP as never,
+        db,
+        makeTracer(),
+        makeOrgSettings(),
+      );
 
       await expect(
         svc.createBank('org1', 'My Bank', 'desc', 0.5, {
@@ -891,7 +905,12 @@ describe('HmaService', () => {
         'DELETE /c/exchange/COOP_ORG1_TEST_BANK': fail(500),
       });
       const { db, deleteFrom } = makeMockKyselyPg();
-      const svc = new HmaService(fetchHTTP as never, db, makeTracer());
+      const svc = new HmaService(
+        fetchHTTP as never,
+        db,
+        makeTracer(),
+        makeOrgSettings(),
+      );
 
       await expect(svc.deleteBank('org1', '1')).rejects.toThrow(
         'Failed to delete HMA bank',
@@ -917,7 +936,12 @@ describe('HmaService', () => {
         'DELETE /c/exchange/COOP_ORG1_TEST_BANK': ok({}),
       });
       const { db, deleteFrom } = makeMockKyselyPg();
-      const svc = new HmaService(fetchHTTP as never, db, makeTracer());
+      const svc = new HmaService(
+        fetchHTTP as never,
+        db,
+        makeTracer(),
+        makeOrgSettings(),
+      );
 
       expect(await svc.getBankById('org1', 1)).toBeNull();
       expect(
@@ -932,7 +956,12 @@ describe('HmaService', () => {
         'DELETE /c/exchange/COOP_ORG1_TEST_BANK': fail(500),
       });
       const { db, deleteFrom } = makeMockKyselyPg();
-      const svc = new HmaService(fetchHTTP as never, db, makeTracer());
+      const svc = new HmaService(
+        fetchHTTP as never,
+        db,
+        makeTracer(),
+        makeOrgSettings(),
+      );
 
       expect(await svc.getBankById('org1', 1)).toEqual(MOCK_BANK);
       expect(deleteFrom).not.toHaveBeenCalled();
@@ -946,7 +975,12 @@ describe('HmaService', () => {
         'PUT /c/bank/COOP_ORG1_TEST_BANK': ok({}),
       });
       const { db, updates } = makeMockKyselyPg();
-      const svc = new HmaService(fetchHTTP as never, db, makeTracer());
+      const svc = new HmaService(
+        fetchHTTP as never,
+        db,
+        makeTracer(),
+        makeOrgSettings(),
+      );
 
       await svc.updateBank('org1', '1', { name: 'renamed' });
 
@@ -964,7 +998,12 @@ describe('HmaService', () => {
         'GET /c/exchange/COOP_ORG1_TEST_BANK': ok({ api: 'ncmec' }),
       });
       const { db, updates } = makeMockKyselyPg();
-      const svc = new HmaService(fetchHTTP as never, db, makeTracer());
+      const svc = new HmaService(
+        fetchHTTP as never,
+        db,
+        makeTracer(),
+        makeOrgSettings(),
+      );
 
       await svc.updateBank('org1', '1', { name: 'renamed' });
 
@@ -981,7 +1020,12 @@ describe('HmaService', () => {
       const { db, updates } = makeMockKyselyPg({
         takenHmaNames: ['COOP_ORG1_RENAMED'],
       });
-      const svc = new HmaService(fetchHTTP as never, db, makeTracer());
+      const svc = new HmaService(
+        fetchHTTP as never,
+        db,
+        makeTracer(),
+        makeOrgSettings(),
+      );
 
       await svc.updateBank('org1', '1', { name: 'Renamed!' });
 
@@ -997,7 +1041,12 @@ describe('HmaService', () => {
         'GET /c/exchange/COOP_ORG1_TEST_BANK': fail(404),
       });
       const { db, updates } = makeMockKyselyPg();
-      const svc = new HmaService(fetchHTTP as never, db, makeTracer());
+      const svc = new HmaService(
+        fetchHTTP as never,
+        db,
+        makeTracer(),
+        makeOrgSettings(),
+      );
 
       await svc.updateBank('org1', '1', { name: 'Test Bank' });
 
@@ -1011,7 +1060,12 @@ describe('HmaService', () => {
         'PUT /c/bank/COOP_ORG1_TEST_BANK': fail(403),
       });
       const { db, updates } = makeMockKyselyPg();
-      const svc = new HmaService(fetchHTTP as never, db, makeTracer());
+      const svc = new HmaService(
+        fetchHTTP as never,
+        db,
+        makeTracer(),
+        makeOrgSettings(),
+      );
 
       await expect(
         svc.updateBank('org1', '1', { name: 'renamed' }),
@@ -1038,7 +1092,12 @@ describe('HmaService', () => {
     it('rejects renaming to a name the org already uses', async () => {
       const fetchHTTP = routeFetch({});
       const { db, updates } = makeMockKyselyPg();
-      const svc = new HmaService(fetchHTTP as never, db, makeTracer());
+      const svc = new HmaService(
+        fetchHTTP as never,
+        db,
+        makeTracer(),
+        makeOrgSettings(),
+      );
       const otherBank = { ...MOCK_BANK, id: 2, name: 'other' };
       vi.spyOn(
         (svc as unknown as { hashBankService: HashBankService })
@@ -1058,7 +1117,12 @@ describe('HmaService', () => {
         'PUT /c/bank/COOP_ORG1_TEST_BANK': ok({}),
       });
       const { db, updates } = makeMockKyselyPg();
-      const svc = new HmaService(fetchHTTP as never, db, makeTracer());
+      const svc = new HmaService(
+        fetchHTTP as never,
+        db,
+        makeTracer(),
+        makeOrgSettings(),
+      );
 
       await svc.updateBank('org1', '1', {
         name: 'renamed',
@@ -1546,6 +1610,138 @@ describe('HmaService', () => {
             HashBankUserError,
           );
           expect(fetchHTTP).not.toHaveBeenCalled();
+        });
+      });
+
+      describe('when the org has turned CLIP off', () => {
+        const orgOff = () => makeOrgSettings(false);
+
+        it('hides CLIP banks from listBanks without deleting them', async () => {
+          const mockDb = makeMockKyselyPg({ banks: [MOCK_BANK, CLIP_BANK] });
+          const fetchHTTP = routeFetch({
+            'GET /c/bank/COOP_ORG1_TEST_BANK': ok({}),
+          });
+          const svc = makeClipService(fetchHTTP, CLIP_URL, {
+            mockDb,
+            orgSettings: orgOff(),
+          });
+
+          const banks = await svc.listBanks('org1');
+
+          expect(banks.map((b) => b.name)).toEqual(['test bank']);
+          expect(urlsOf(fetchHTTP).some((u) => u.includes('CLIP_BANK'))).toBe(
+            false,
+          );
+          expect(mockDb.deleteFrom).not.toHaveBeenCalled();
+        });
+
+        it('keeps standard banks, hiding only CLIP banks, when the setting cannot be read', async () => {
+          const orgSettings = {
+            hasClipHashingEnabled: vi
+              .fn()
+              .mockRejectedValue(new Error('settings unavailable')),
+          };
+          const tracer = makeTracer();
+          const mockDb = makeMockKyselyPg({ banks: [MOCK_BANK, CLIP_BANK] });
+          const fetchHTTP = routeFetch({
+            'GET /c/bank/COOP_ORG1_TEST_BANK': ok({}),
+          });
+          const svc = makeClipService(fetchHTTP, CLIP_URL, {
+            mockDb,
+            orgSettings,
+            tracer,
+          });
+
+          const banks = await svc.listBanks('org1');
+
+          expect(banks.map((b) => b.name)).toEqual(['test bank']);
+          expect(mockDb.deleteFrom).not.toHaveBeenCalled();
+          expect(tracer.logActiveSpanFailedIfAny).toHaveBeenCalledWith(
+            expect.objectContaining({ message: 'settings unavailable' }),
+          );
+        });
+
+        it('does not read the org setting when the org has no CLIP banks', async () => {
+          const orgSettings = orgOff();
+          const mockDb = makeMockKyselyPg({ banks: [MOCK_BANK] });
+          const fetchHTTP = routeFetch({
+            'GET /c/bank/COOP_ORG1_TEST_BANK': ok({}),
+          });
+          const svc = makeClipService(fetchHTTP, CLIP_URL, {
+            mockDb,
+            orgSettings,
+          });
+
+          await svc.listBanks('org1');
+
+          expect(orgSettings.hasClipHashingEnabled).not.toHaveBeenCalled();
+        });
+
+        it.each([
+          [
+            'getBank',
+            async (svc: HmaService) => svc.getBank('org1', 'clip bank'),
+          ],
+          [
+            'getBankById',
+            async (svc: HmaService) => svc.getBankById('org1', 2),
+          ],
+        ])('%s returns null without calling HMA', async (_n, get) => {
+          const mockDb = makeMockKyselyPg({ bank: CLIP_BANK });
+          const fetchHTTP = vi.fn();
+          const svc = makeClipService(fetchHTTP, CLIP_URL, {
+            mockDb,
+            orgSettings: orgOff(),
+          });
+
+          await expect(get(svc)).resolves.toBeNull();
+          expect(fetchHTTP).not.toHaveBeenCalled();
+          expect(mockDb.deleteFrom).not.toHaveBeenCalled();
+        });
+
+        it('refuses to create, update or delete a CLIP bank with a user error', async () => {
+          const mockDb = makeMockKyselyPg({ bank: CLIP_BANK });
+          const fetchHTTP = vi.fn();
+          const svc = makeClipService(fetchHTTP, CLIP_URL, {
+            mockDb,
+            orgSettings: orgOff(),
+          });
+
+          await expect(
+            svc.createBank('org1', 'new clip', 'd', 1, undefined, 'CLIP'),
+          ).rejects.toThrow(/turned off for your organization/);
+          await expect(
+            svc.updateBank('org1', '2', { name: 'x' }),
+          ).rejects.toBeInstanceOf(HashBankUserError);
+          await expect(svc.deleteBank('org1', '2')).rejects.toBeInstanceOf(
+            HashBankUserError,
+          );
+          expect(fetchHTTP).not.toHaveBeenCalled();
+        });
+
+        it('still creates standard banks', async () => {
+          const fetchHTTP = routeFetch({ 'POST /c/banks': created() });
+          const svc = makeClipService(fetchHTTP, CLIP_URL, {
+            orgSettings: orgOff(),
+          });
+
+          await expect(
+            svc.createBank('org1', 'my bank', 'd', 1),
+          ).resolves.toBeDefined();
+        });
+
+        it('reports CLIP unavailable to the org, and available once turned on', async () => {
+          await expect(
+            makeClipService(vi.fn(), CLIP_URL, {
+              orgSettings: orgOff(),
+            }).isClipAvailableToOrg('org1'),
+          ).resolves.toBe(false);
+          await expect(
+            makeClipService(vi.fn(), CLIP_URL).isClipAvailableToOrg('org1'),
+          ).resolves.toBe(true);
+          await expect(
+            makeClipService(vi.fn(), null).isClipAvailableToOrg('org1'),
+          ).resolves.toBe(false);
         });
       });
 

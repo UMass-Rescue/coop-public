@@ -392,17 +392,19 @@ describe('hashBanks resolvers', () => {
   });
 
   describe('Query.hashBankHmaInstances', () => {
-    it('offers only DEFAULT when CLIP is not deployed', async () => {
-      const ctx = makeContext({
-        isClipEnabled: vi.fn().mockReturnValue(false),
-      });
+    it('offers only DEFAULT when CLIP is not available to the org', async () => {
+      const isClipAvailableToOrg = vi.fn().mockResolvedValue(false);
+      const ctx = makeContext({ isClipAvailableToOrg });
       await expect(
         (resolvers.Query as any).hashBankHmaInstances({}, {}, ctx),
       ).resolves.toEqual(['DEFAULT']);
+      expect(isClipAvailableToOrg).toHaveBeenCalledWith('org1');
     });
 
-    it('offers CLIP too when CLIP is deployed', async () => {
-      const ctx = makeContext({ isClipEnabled: vi.fn().mockReturnValue(true) });
+    it('offers CLIP too when CLIP is available to the org', async () => {
+      const ctx = makeContext({
+        isClipAvailableToOrg: vi.fn().mockResolvedValue(true),
+      });
       await expect(
         (resolvers.Query as any).hashBankHmaInstances({}, {}, ctx),
       ).resolves.toEqual(['DEFAULT', 'CLIP']);

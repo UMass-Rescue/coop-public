@@ -122,7 +122,9 @@ const Query: GQLQueryResolvers<Context> = {
     }
 
     const instances: HmaInstance[] = ['DEFAULT'];
-    if (context.services.HMAHashBankService.isClipEnabled()) {
+    if (
+      await context.services.HMAHashBankService.isClipAvailableToOrg(user.orgId)
+    ) {
       instances.push('CLIP');
     }
     return instances;
