@@ -9,6 +9,7 @@ import {
   GQLSignalType,
   GQLValueComparator,
 } from '../../../../graphql/generated';
+import { matchingValuesForNewSignal } from '../../rules/imageBankInstance';
 import { getDerivedFieldOutputType } from '../../rules/rule_form/condition/input/derivedField';
 import {
   getConditionInputScalarType,
@@ -327,6 +328,46 @@ export function updateComparator(params: {
     location,
     comparator,
     (condition, value) => ({ ...condition, comparator: value }),
+  );
+}
+
+/**
+ * Changes a condition's signal. The threshold is cleared, and so are banks
+ * picked for the old signal that the new one cannot use. A signal with a
+ * subcategory is applied together with it in one update, so that the form
+ * state is only set once.
+ */
+export function updateSignal(params: {
+  conditionSet: RuleFormConditionSet;
+  location: ConditionLocation;
+  signal: GQLSignal;
+  subcategory?: string;
+}) {
+  const { conditionSet, location, signal, subcategory } = params;
+
+  const withSignal = updateConditionComponent(
+    conditionSet,
+    location,
+    signal,
+    (condition, value) => ({
+      ...condition,
+      matchingValues: matchingValuesForNewSignal(condition, value),
+      signal: value,
+      threshold: undefined,
+    }),
+  );
+
+  if (!subcategory) {
+    return withSignal;
+  }
+  return updateConditionComponent(
+    withSignal,
+    location,
+    subcategory,
+    (condition, value) => ({
+      ...condition,
+      signal: { ...condition.signal!, subcategory: value },
+    }),
   );
 }
 
