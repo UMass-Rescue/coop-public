@@ -14,7 +14,7 @@ import { HashBankService } from './hashBankService.js';
 
 // Export types for external use
 export type { HashBank, HmaInstance } from './dbTypes.js';
-export { HashBankUserError } from './errors.js';
+export { HashBankUserError, HmaRequestError } from './errors.js';
 export { HashBankService } from './hashBankService.js';
 
 export type ContentType = 'photo' | 'video';
@@ -36,6 +36,10 @@ export interface BankMatches {
 export interface LookupResponse {
   [bankName: string]: BankMatch[] | undefined;
 }
+
+const DEFAULT_CLIP_TIMEOUT_MS = 10_000;
+// A clip_float embedding is 4096 hex characters; this only bounds a bad response.
+const MAX_CLIP_EMBEDDING_LENGTH = 16_384;
 
 // Signal types computed by the optional CLIP HMA instance (CLIP_HMA_SERVICE_URL).
 // Every other signal type belongs to the default instance (HMA_SERVICE_URL).
@@ -273,6 +277,9 @@ export class HmaService {
   private readonly hmaServiceUrl: string;
   // Unset unless the optional CLIP HMA instance is deployed.
   private readonly clipServiceUrl: string | undefined;
+  // fetchHTTP has no timeout by default, and a CLIP request that hangs would
+  // otherwise hold up the caller indefinitely.
+  private readonly clipTimeoutMs: number;
   private readonly hashBankService: HashBankService;
 
   constructor(
@@ -291,6 +298,11 @@ export class HmaService {
       '',
     );
     this.clipServiceUrl = clipUrl === '' ? undefined : clipUrl;
+    const clipTimeoutMs = Number(process.env.CLIP_HASH_TIMEOUT_MS);
+    this.clipTimeoutMs =
+      Number.isFinite(clipTimeoutMs) && clipTimeoutMs > 0
+        ? clipTimeoutMs
+        : DEFAULT_CLIP_TIMEOUT_MS;
     this.hashBankService = new HashBankService(kyselyPg);
   }
 
@@ -712,6 +724,7 @@ export class HmaService {
     try {
       const response = await this.fetchHTTP({
         url: `${this.urlFor(bank.hma_instance)}/c/bank/${bank.hma_name}`,
+        timeoutMs: this.timeoutFor(bank.hma_instance),
         method: 'get',
         handleResponseBody: 'discard',
       });
@@ -778,6 +791,7 @@ export class HmaService {
     try {
       const response = await this.fetchHTTP({
         url: `${this.urlFor(bank.hma_instance)}/c/bank/${bank.hma_name}`,
+        timeoutMs: this.timeoutFor(bank.hma_instance),
         method: 'get',
         handleResponseBody: 'discard',
       });
@@ -825,6 +839,7 @@ export class HmaService {
           try {
             const response = await this.fetchHTTP({
               url: `${this.urlFor(bank.hma_instance)}/c/bank/${bank.hma_name}`,
+              timeoutMs: this.timeoutFor(bank.hma_instance),
               method: 'get',
               headers: {
                 'Content-Type': 'application/json',
@@ -1155,6 +1170,11 @@ export class HmaService {
     return instance === 'CLIP' ? this.requireClipUrl() : this.hmaServiceUrl;
   }
 
+  /** Only the CLIP instance gets a timeout; the default instance is unchanged. */
+  private timeoutFor(instance: HmaInstance): number | undefined {
+    return instance === 'CLIP' ? this.clipTimeoutMs : undefined;
+  }
+
   /** CLIP banks are hidden, not deleted, while CLIP is off for their org. */
   private async isUsable(bank: HashBank): Promise<boolean> {
     return (
@@ -1177,6 +1197,7 @@ export class HmaService {
       url: `${this.requireClipUrl()}/h/hash?url=${encodeURIComponent(url)}`,
       method: 'get',
       handleResponseBody: 'as-json',
+      timeoutMs: this.clipTimeoutMs,
     });
 
     if (!response.ok) {
@@ -1186,7 +1207,18 @@ export class HmaService {
       );
     }
 
-    return response.body as unknown as Record<string, string>;
+    // Keep only the embedding we expect: whatever is returned is stored on the
+    // item, and each key would be used as a signal type for lookups.
+    const embedding = (response.body as { clip_float?: unknown } | null)
+      ?.clip_float;
+    if (
+      typeof embedding !== 'string' ||
+      embedding.length > MAX_CLIP_EMBEDDING_LENGTH ||
+      !/^[0-9a-f]+$/i.test(embedding)
+    ) {
+      throw new Error('Unexpected response from the CLIP instance');
+    }
+    return { clip_float: embedding };
   }
 
   /**
@@ -1204,6 +1236,7 @@ export class HmaService {
       body: jsonStringify({ signal_type: signalType, signal, banks }),
       headers: { 'Content-Type': 'application/json' },
       handleResponseBody: 'as-json',
+      timeoutMs: this.clipTimeoutMs,
     });
 
     if (!response.ok) {

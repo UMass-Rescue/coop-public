@@ -4,6 +4,7 @@ import { jsonParse } from '../../utils/encoding.js';
 import type { HashBank } from './dbTypes.js';
 import {
   HashBankUserError,
+  HmaRequestError,
   HmaService,
   isClipSignalType,
   type ExchangeInfo,
@@ -1213,6 +1214,111 @@ describe('HmaService', () => {
       expect(isClipSignalType('pdq')).toBe(false);
     });
 
+    describe('hashClipFromUrl response validation', () => {
+      const hashWith = async (body: unknown) =>
+        makeClipService(
+          routeFetch({ 'GET /h/hash': ok(body) }),
+        ).hashClipFromUrl('https://x.test/a.png');
+
+      it('returns only the clip_float embedding', async () => {
+        await expect(
+          hashWith({ clip_float: HASH, pdq: 'abc', surprise: 'x' }),
+        ).resolves.toEqual({ clip_float: HASH });
+      });
+
+      it.each([
+        ['an empty body', {}],
+        ['a null body', null],
+        ['a string body', 'clip_float'],
+        ['a missing embedding', { pdq: 'abc' }],
+        ['a non-string embedding', { clip_float: [1, 2, 3] }],
+        ['a non-hex embedding', { clip_float: 'not hex!' }],
+        ['an empty embedding', { clip_float: '' }],
+        ['an oversized embedding', { clip_float: 'a'.repeat(16_385) }],
+      ])('rejects %s as an unexpected response', async (_name, body) => {
+        await expect(hashWith(body)).rejects.toThrow(
+          'Unexpected response from the CLIP instance',
+        );
+      });
+
+      it('does not mistake an unexpected response for a bad image', async () => {
+        // The caller treats an HmaRequestError with a 4xx status as "this one
+        // image could not be hashed" and carries on; a malformed 200 must not.
+        await expect(hashWith({})).rejects.not.toBeInstanceOf(HmaRequestError);
+      });
+    });
+
+    describe('timeouts', () => {
+      const timeoutOf = (fetchHTTP: Mock, pathPart: string) =>
+        (
+          fetchHTTP.mock.calls
+            .map((c) => c[0] as { url: string; timeoutMs?: number })
+            .find((c) => c.url.includes(pathPart)) ?? {}
+        ).timeoutMs;
+
+      it('gives CLIP hashing and lookups a 10 second timeout by default', async () => {
+        const fetchHTTP = routeFetch({
+          'GET /h/hash': ok({ clip_float: HASH }),
+          'POST /m/lookup': ok({}),
+        });
+        const svc = makeClipService(fetchHTTP);
+
+        await svc.hashClipFromUrl('https://x.test/a.png');
+        await svc.checkImageMatchWithDetails(['B'], 'clip_float', HASH);
+
+        expect(timeoutOf(fetchHTTP, '/h/hash')).toBe(10_000);
+        expect(timeoutOf(fetchHTTP, '/m/lookup')).toBe(10_000);
+      });
+
+      it('takes the timeout from CLIP_HASH_TIMEOUT_MS', async () => {
+        vi.stubEnv('CLIP_HASH_TIMEOUT_MS', '2500');
+        const fetchHTTP = routeFetch({
+          'GET /h/hash': ok({ clip_float: HASH }),
+        });
+
+        await makeClipService(fetchHTTP).hashClipFromUrl('u');
+
+        expect(timeoutOf(fetchHTTP, '/h/hash')).toBe(2500);
+      });
+
+      it.each(['abc', '0', '-5', ''])(
+        'falls back to the default for CLIP_HASH_TIMEOUT_MS=%j',
+        async (value) => {
+          vi.stubEnv('CLIP_HASH_TIMEOUT_MS', value);
+          const fetchHTTP = routeFetch({
+            'GET /h/hash': ok({ clip_float: HASH }),
+          });
+
+          await makeClipService(fetchHTTP).hashClipFromUrl('u');
+
+          expect(timeoutOf(fetchHTTP, '/h/hash')).toBe(10_000);
+        },
+      );
+
+      it('times out verifying CLIP banks but leaves default banks unchanged', async () => {
+        const defaultBank = MOCK_BANK;
+        const clipBank: HashBank = {
+          ...MOCK_BANK,
+          id: 2,
+          name: 'clip bank',
+          hma_name: 'COOP_ORG1_CLIP_BANK',
+          hma_instance: 'CLIP',
+        };
+        const fetchHTTP = routeFetch({
+          'GET /c/bank/COOP_ORG1_TEST_BANK': ok({}),
+          'GET /c/bank/COOP_ORG1_CLIP_BANK': ok({}),
+        });
+        const svc = makeClipService(fetchHTTP, CLIP_URL, {
+          mockDb: makeMockKyselyPg({ banks: [defaultBank, clipBank] }),
+        });
+
+        await svc.listBanks('org1');
+
+        expect(timeoutOf(fetchHTTP, 'COOP_ORG1_CLIP_BANK')).toBe(10_000);
+        expect(timeoutOf(fetchHTTP, 'COOP_ORG1_TEST_BANK')).toBeUndefined();
+      });
+    });
+
     describe('hashClipFromUrl', () => {
       it('hashes through the CLIP instance, not the default one', async () => {
         const fetchHTTP = routeFetch({
@@ -1231,7 +1337,9 @@ describe('HmaService', () => {
       });
 
       it('tolerates a trailing slash on the configured URL', async () => {
-        const fetchHTTP = routeFetch({ 'GET /h/hash': ok({}) });
+        const fetchHTTP = routeFetch({
+          'GET /h/hash': ok({ clip_float: HASH }),
+        });
         await makeClipService(fetchHTTP, `${CLIP_URL}/`).hashClipFromUrl('u');
         expect(callsTo(fetchHTTP, 'get', '/h/hash')[0].url).toMatch(
           /^http:\/\/hma-clip:5100\/h\/hash\?/,
