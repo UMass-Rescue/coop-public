@@ -20,7 +20,10 @@ import {
 import { withRetries } from '../../utils/misc.js';
 import { type RequestHandlerWithBodies } from '../../utils/route-helpers.js';
 import { isValidDate } from '../../utils/time.js';
-import { addHashesToImageFields } from '../items/hashImageFields.js';
+import {
+  addHashesToImageFields,
+  makeClipHasherForOrg,
+} from '../items/hashImageFields.js';
 import {
   type ReportItemInput,
   type ReportItemOutput,
@@ -105,6 +108,11 @@ export default function submitReport({
           data: reportedItemSubmission.itemSubmission.data,
           orgId,
           HMAHashBankService,
+          clipHasher: makeClipHasherForOrg({
+            orgId,
+            HMAHashBankService,
+            onOutcome: (outcome) => Meter.clipHashesCounter.add(1, { outcome }),
+          }),
         });
       }
 

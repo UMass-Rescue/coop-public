@@ -5,7 +5,7 @@
 CLIP is a separate deployment. The default HMA instance is unchanged and needs no GPU. If you don't deploy the CLIP instance, nothing changes for you.
 
 > [!NOTE]
-> This page covers deploying and checking the CLIP HMA instance. Using it from Coop rules is not available yet.
+> This page covers deploying the CLIP HMA instance, turning it on for an organization, and what Coop does with it when images are submitted. Matching images against CLIP banks in rules is not available yet.
 
 ## System requirements
 
@@ -65,7 +65,42 @@ Set the instance's URL in `server/.env` and restart the Coop server:
 CLIP_HMA_SERVICE_URL=http://localhost:9877
 ```
 
-The URL has to be reachable from wherever the Coop server runs: `localhost:9877` works when the server runs on your host, while a server running in Docker needs the service name and container port, such as `http://hma-clip:5100` on the same Compose network. When unset, Coop treats CLIP as not deployed. Coop's HMA service uses this URL to hash images with CLIP and to look hashes up in CLIP banks, but nothing in the rule builder or ingestion uses it yet.
+The URL has to be reachable from wherever the Coop server runs: `localhost:9877` works when the server runs on your host, while a server running in Docker needs the service name and container port, such as `http://hma-clip:5100` on the same Compose network. When unset, Coop treats CLIP as not deployed.
+
+## Turn it on for an organization
+
+Deploying CLIP does not change anything for an organization until an admin turns it on under **Settings** → **Image Matching** (shown only when the deployment has CLIP, and only to users who can manage the organization). Turning it on:
+
+- adds a **Semantic (CLIP)** option when creating hash banks;
+- makes Coop compute a CLIP embedding for each image submitted by the organization.
+
+Turning it off hides the organization's CLIP banks and stops computing embeddings. Nothing is deleted, and turning it back on restores the banks. A hidden bank still holds its name, so a new bank cannot reuse it.
+
+## How images are hashed
+
+When an item with images is submitted, or an item is reported, Coop hashes each image with PDQ as before. For an organization with CLIP on, it also asks the CLIP instance for an embedding and stores it on the image, next to the PDQ hashes:
+
+```json
+{
+  "url": "https://example.com/a.jpg",
+  "hashes": { "pdq": "…" },
+  "embeddings": { "clip_float": "…" },
+  "matchedBanks": ["Known images", "Similar to known images"]
+}
+```
+
+The embedding is kept under `embeddings`, apart from `hashes`, because everything in `hashes` is treated as an exact file hash and included in NCMEC reports. `matchedBanks` lists the standard banks the PDQ hash matched and the CLIP banks the embedding matched, and reviewers see it in the review console.
+
+This happens while the submission request is handled, so the request waits for it. Things to know:
+
+- **Calls to the CLIP instance run one at a time** within a request, both hashing and bank lookups, because the instance handles one at a time. A large batch therefore takes roughly 0.3 seconds per image on a CPU (measured on small test images; real photos and a GPU will differ).
+- **Every call has a timeout**, 10 seconds by default. Set `CLIP_HASH_TIMEOUT_MS` to change it. The timeout includes any time the call waits in the CLIP instance's own queue. The instance serves one call at a time for every request to it, and Coop only orders the calls within a single request, so under heavy concurrent load a call can time out even though the instance is healthy. If you see `service_error` outcomes under load, raise the timeout or give the instance more capacity (more workers, or a GPU).
+- **There is no overall limit on a request.** Typically each image adds about 0.3 seconds, but if every call ran up to its timeout, a batch of N images could take close to 20 × N seconds. Clients with short timeouts should submit small batches.
+- **A failure never blocks the submission or the PDQ hashes.** If one image cannot be hashed (for example, its URL is blocked or is not an image), only that image has no embedding. If the CLIP instance itself fails or times out twice in a row, the remaining images in that request skip CLIP, so a down instance cannot stall a large batch for one timeout per image. A single failure does not stop it, so one slow image host does not switch CLIP off for the whole batch. Rate limiting (HTTP 429) and timeouts from the instance count as failures of the instance, not of the image.
+- **Each embedding adds about 4 KB per image** to the stored item data, against 64 bytes for a PDQ hash. It is stored with the item, logged with the submission, and sent to the review console with a review job. NCMEC reports and custom-action callbacks do not include it.
+- **Only newly submitted items get embeddings.** Items stored before CLIP was turned on, and items re-evaluated later, have none.
+
+When the CLIP instance itself fails, the error is logged once for the request. The `coop-api.clip-hashing.counter` metric counts every hashing attempt by `outcome` (`success`, `image_error`, `service_error`, `skipped`), so skipped images are visible even though they are not logged one by one.
 
 ## Check that it works
 

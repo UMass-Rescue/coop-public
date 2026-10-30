@@ -32,6 +32,11 @@ export class CoopMeter {
   // the percentage of traffic we are sending to the queue and
   // expect to be processed by the worker deployment
   public readonly itemsEnqueued: opentelemetry.Counter;
+  // Counts CLIP hashing attempts made while handling item submissions, by
+  // `outcome`: success, image_error (that image could not be hashed),
+  // service_error (the CLIP service failed; the rest of the request skips
+  // CLIP), or skipped (not attempted because of an earlier service_error).
+  public readonly clipHashesCounter: opentelemetry.Counter;
 
   /**
    * Metrics related to the Manual Review Tool (MRT) lifecycle
@@ -76,6 +81,9 @@ export class CoopMeter {
     );
     this.itemsEnqueued = myMeter.createCounter(
       `${metricNamespace}.items.enqueued-to-processing-queue.counter`,
+    );
+    this.clipHashesCounter = myMeter.createCounter(
+      `${metricNamespace}.clip-hashing.counter`,
     );
     this.itemProcessingJobTime = myMeter.createHistogram(
       `${metricNamespace}.items.job-processing-time-ms.histogram`,
