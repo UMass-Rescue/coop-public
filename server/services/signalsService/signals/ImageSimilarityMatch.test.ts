@@ -140,4 +140,53 @@ describe('ImageSimilarityMatchSignal', () => {
       jsonParse(result.matchedValue! as JsonOf<{ matchedBanks: string[] }>),
     ).toEqual({ matchedBanks: ['Test Bank'] });
   });
+
+  describe('CLIP banks', () => {
+    const clipBank = {
+      ...mockBanks[0],
+      id: 99,
+      name: 'Clip Bank',
+      hma_name: 'ORG_CLIP_BANK',
+      hma_instance: 'CLIP' as const,
+    };
+    const image = {
+      type: 'IMAGE',
+      value: { url: 'https://example.com/img.png', hashes: { pdq: 'abc' } },
+    };
+
+    it('only checks hashes against the standard banks of a mixed selection', async () => {
+      const check = vi
+        .fn()
+        .mockResolvedValue({ matched: false, matchedBanks: [] });
+      const signal = makeSignal(check);
+
+      await signal.run({
+        value: image,
+        matchingValues: [...mockBanks, clipBank],
+        orgId: 'org-1',
+        actionPenalties: undefined,
+      } as unknown as MatchSignalInput);
+
+      expect(check).toHaveBeenCalledTimes(1);
+      expect(check).toHaveBeenCalledWith([mockBanks[0].hma_name], 'pdq', 'abc');
+    });
+
+    it('is a permanent error when only CLIP banks were selected', async () => {
+      const check = vi.fn();
+      const signal = makeSignal(check);
+
+      await expect(
+        signal.run({
+          value: image,
+          matchingValues: [clipBank],
+          orgId: 'org-1',
+          actionPenalties: undefined,
+        } as unknown as MatchSignalInput),
+      ).rejects.toMatchObject({
+        name: 'SignalPermanentError',
+        title: 'Only CLIP hash banks were selected',
+      });
+      expect(check).not.toHaveBeenCalled();
+    });
+  });
 });

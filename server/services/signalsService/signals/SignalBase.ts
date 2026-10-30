@@ -247,6 +247,15 @@ export default abstract class SignalBase<
   ): Promise<SignalResult<OutputType> | SignalErrorResult>;
 
   /**
+   * Whether the signal is listed for an org at all. Most signals are, whether
+   * or not they are enabled. A signal that cannot work on this deployment can
+   * return false so that orgs are not shown something they cannot use.
+   */
+  async isVisibleToOrg(_orgId: string): Promise<boolean> {
+    return true;
+  }
+
+  /**
    * Returns a DisabledInfo object that tells the client whether
    * the signal is enabled for the logged in user, and if not,
    * what explanation to display.

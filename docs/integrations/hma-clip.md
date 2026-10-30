@@ -102,6 +102,20 @@ This happens while the submission request is handled, so the request waits for i
 
 When the CLIP instance itself fails, the error is logged once for the request. The `coop-api.clip-hashing.counter` metric counts every hashing attempt by `outcome` (`success`, `image_error`, `service_error`, `skipped`), so skipped images are visible even though they are not logged one by one.
 
+## Use it in rules
+
+Once CLIP is on for your organization, rules and routing rules can use the **Image similarity (CLIP)** signal. The signal is only listed on deployments that have a CLIP instance, and it shows as disabled until you turn CLIP on under Settings, Image Matching.
+
+1. Create a CLIP bank and add images to it. CLIP banks and standard banks are kept apart: a rule using the CLIP signal can only pick CLIP banks, and the other image signals (such as PDQ) only pick standard banks. Changing a condition from one kind of signal to the other clears the banks it had selected.
+2. Add the signal to a condition and pick one or more CLIP banks. The signal scores the closest image in those banks from 0 to 1, and 0 when nothing is close enough.
+3. Compare the score with a threshold. The CLIP instance only reports matches that are at least 0.90 similar, so a threshold below 0.90 behaves like 0.90. A threshold can make a rule stricter, but not looser.
+
+Things to know:
+
+- Only images submitted while CLIP was on for the organization have a CLIP embedding. Older images, and images that failed to hash, cannot be scored, so such a condition does not match them.
+- Turning CLIP off stops new images from being hashed and hides the organization's CLIP banks. Rules using the signal cannot load their banks, so they report an error for each item they evaluate until CLIP is turned back on or the rule is changed. The rules and banks are kept, and the rule editor lists the missing banks as "Unavailable bank" so the selection is not lost when the rule is saved.
+- Matching a signal that has no embedding or no CLIP banks is an expected outcome, not an error, and is not counted as a failure.
+
 ## Check that it works
 
 The first hash request downloads the model weights, so it can take a minute or two. Use any publicly reachable image URL.

@@ -186,9 +186,16 @@ export class SignalsService {
   }): Promise<Signal[]> {
     const { orgId, externalOnly = true } = opts;
 
-    const allSignals = Object.values(this.signalsByType).filter((signal) =>
-      isSignalEnabledForOrg(signal.id, orgId),
-    );
+    const allSignals = (
+      await Promise.all(
+        Object.values(this.signalsByType).map(async (signal) =>
+          isSignalEnabledForOrg(signal.id, orgId) &&
+          (await signal.isVisibleToOrg(orgId))
+            ? signal
+            : undefined,
+        ),
+      )
+    ).filter((signal) => signal !== undefined);
 
     const finalSignals = externalOnly
       ? allSignals.filter((it) => signalIsExternal(it.id))

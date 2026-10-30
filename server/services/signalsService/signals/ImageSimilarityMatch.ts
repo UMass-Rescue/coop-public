@@ -2,6 +2,7 @@ import { ScalarTypes } from '@roostorg/coop-types';
 
 import type { Dependencies } from '../../../iocContainer/index.js';
 import { jsonStringify } from '../../../utils/encoding.js';
+import { makeSignalPermanentError } from '../../../utils/errors.js';
 import type { HashBank } from '../../hmaService/dbTypes.js';
 import { SignalPricingStructure as SignalPricingStructureType } from '../types/SignalPricingStructure.js';
 import { SignalType } from '../types/SignalType.js';
@@ -96,10 +97,21 @@ export default class ImageSimilarityMatchSignal extends SignalBase<
     const { value, matchingValues } = input;
 
     // The banks are already loaded and cached by the execution service
-    const banks = matchingValues as unknown as HashBank[];
+    const selectedBanks = matchingValues as unknown as HashBank[];
 
-    if (!banks.length) {
+    if (!selectedBanks.length) {
       throw new Error('No banks provided for matching');
+    }
+
+    // CLIP banks hold embeddings rather than hashes, and only the CLIP signal
+    // can match against them, so they are left out here.
+    const banks = selectedBanks.filter((bank) => bank.hma_instance !== 'CLIP');
+    if (banks.length === 0) {
+      throw makeSignalPermanentError('Only CLIP hash banks were selected', {
+        detail:
+          'This signal only compares images with standard hash banks. Use the CLIP signal for CLIP banks.',
+        shouldErrorSpan: false,
+      });
     }
 
     // Get the image value and its hashes

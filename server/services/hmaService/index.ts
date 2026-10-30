@@ -45,18 +45,28 @@ const MAX_CLIP_EMBEDDING_LENGTH = 16_384;
 // Every other signal type belongs to the default instance (HMA_SERVICE_URL).
 const CLIP_SIGNAL_TYPES: ReadonlySet<string> = new Set(['clip_float']);
 
+// Cosine distance at which HMA stops reporting a CLIP match. It is also
+// enforced locally so that scores below 0.90 never depend on how the CLIP
+// instance is configured.
+const CLIP_MAX_DISTANCE = 0.1;
+
 export function isClipSignalType(signalType: string): boolean {
   return CLIP_SIGNAL_TYPES.has(signalType);
 }
 
-// HMA reports distances as strings. Blank or non-numeric ones must not pass,
-// which a bare Number() would allow ('' and null both become 0).
-function isDistanceWithin(distance: unknown, maxDistance: number): boolean {
+// HMA reports distances as strings. Blank or non-numeric ones are not
+// distances at all, which a bare Number() would hide ('' and null both become 0).
+function parseDistance(distance: unknown): number | undefined {
   if (typeof distance !== 'string' || distance.trim() === '') {
-    return false;
+    return undefined;
   }
   const value = Number(distance);
-  return Number.isFinite(value) && value <= maxDistance;
+  return Number.isFinite(value) ? value : undefined;
+}
+
+function isDistanceWithin(distance: unknown, maxDistance: number): boolean {
+  const value = parseDistance(distance);
+  return value !== undefined && value <= maxDistance;
 }
 
 export interface ExchangeFieldDescriptor {
@@ -1399,6 +1409,58 @@ export class HmaService {
     return {
       matched: matchedBanks.length > 0,
       matchedBanks,
+    };
+  }
+
+  /**
+   * Finds how close a CLIP embedding is to the images in the given CLIP banks.
+   * Returns the closest cosine distance (0 is identical) and the banks that
+   * had a match. Only matches within cosine distance 0.10 count, whatever the
+   * CLIP instance's own cutoff is, so a distance is only ever reported for
+   * images that are close enough.
+   * Matches without a usable distance are ignored, since they cannot be scored.
+   * With CLIP not deployed, or no banks to look in, nothing matches.
+   * @param hmaBankIds HMA names of the CLIP banks to look in
+   * @param embedding The hex clip_float embedding of the image
+   */
+  async findClosestClipMatch(
+    hmaBankIds: string[],
+    embedding: string,
+  ): Promise<{
+    matchedBanks: string[];
+    closestDistance: number | undefined;
+  }> {
+    // HMA reads an empty bank list as "search every bank".
+    if (!this.isClipEnabled() || hmaBankIds.length === 0) {
+      return { matchedBanks: [], closestDistance: undefined };
+    }
+    const matches = await this.lookupClipSignal(
+      hmaBankIds,
+      'clip_float',
+      embedding,
+    );
+
+    const distancesByBank = hmaBankIds.map((bankId) => {
+      const bankMatches = matches[bankId];
+      return {
+        bankId,
+        distances: Array.isArray(bankMatches)
+          ? bankMatches
+              .map((match) => parseDistance(match.distance))
+              .filter((distance) => distance !== undefined)
+              .filter((distance) => distance <= CLIP_MAX_DISTANCE)
+          : [],
+      };
+    });
+    const matchedBanks = distancesByBank
+      .filter(({ distances }) => distances.length > 0)
+      .map(({ bankId }) => bankId);
+    const allDistances = distancesByBank.flatMap(({ distances }) => distances);
+
+    return {
+      matchedBanks,
+      closestDistance:
+        allDistances.length > 0 ? Math.min(...allDistances) : undefined,
     };
   }
 
