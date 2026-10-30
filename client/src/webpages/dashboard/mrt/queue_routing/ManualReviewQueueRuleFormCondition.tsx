@@ -27,6 +27,7 @@ import {
   getInputScalarType,
   updateConditionComponent,
   updateConditionInput,
+  updateSignal,
 } from './utils';
 
 const { Option } = Select;
@@ -189,34 +190,16 @@ export default function ManualReviewQueueRuleFormCondition(props: {
         condition={condition}
         location={location}
         editing={editing}
-        onUpdateSignal={(signal: GQLSignal, subcategory?: string) => {
-          // Do this manually instead of having a helper function to avoid
-          // setting the state multiple times in the case of the signal having a subcategory
-          let newConditionSet = updateConditionComponent(
-            parentConditionSet,
-            location,
-            signal,
-            (condition, value) => ({
-              ...condition,
-              signal: value,
-              threshold: undefined,
-            }),
-          );
-
-          if (subcategory) {
-            newConditionSet = updateConditionComponent(
-              newConditionSet,
+        onUpdateSignal={(signal: GQLSignal, subcategory?: string) =>
+          onUpdateConditionSet(
+            updateSignal({
+              conditionSet: parentConditionSet,
               location,
+              signal,
               subcategory,
-              (condition, value) => ({
-                ...condition,
-                signal: { ...condition.signal!, subcategory: value },
-              }),
-            );
-          }
-
-          onUpdateConditionSet(newConditionSet);
-        }}
+            }),
+          )
+        }
       />
       <ManualReviewQueueRuleConditionMatchingValues
         condition={condition}

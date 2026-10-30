@@ -9,7 +9,11 @@ import {
 } from '../../../../graphql/generated';
 import { RuleFormLeafCondition } from '../types';
 import { initialState, RuleFormState } from './RuleForm';
-import { RuleFormReducerActionType, updateInput } from './RuleFormReducers';
+import {
+  RuleFormReducerActionType,
+  updateInput,
+  updateSignal,
+} from './RuleFormReducers';
 import {
   getConditionInputScalarType,
   getEligibleSignalsForInput,
@@ -132,5 +136,52 @@ describe('updateInput signal eligibility', () => {
     const updatedLeaf = result.conditionSet
       .conditions[0] as RuleFormLeafCondition;
     expect(updatedLeaf.signal).toEqual(custom2);
+  });
+});
+
+const location = { conditionIndex: 0, conditionSetIndex: 0 };
+const pdq = makeSignal('pdq', GQLSignalType.ImageSimilarityMatch);
+const clip = makeSignal('clip', GQLSignalType.ImageClipMatch);
+
+function stateWith(signal: GQLSignal): RuleFormState {
+  return {
+    ...initialState,
+    conditionSet: {
+      conjunction: GQLConditionConjunction.And,
+      conditions: [
+        {
+          signal,
+          threshold: '0.9',
+          matchingValues: { imageBankIds: ['1'], strings: ['kept'] },
+        },
+      ],
+    },
+  };
+}
+
+function switchTo(from: GQLSignal, to: GQLSignal) {
+  return updateSignal(stateWith(from), {
+    type: RuleFormReducerActionType.UpdateSignal,
+    payload: { location, signal: to },
+  }).conditionSet.conditions[0] as RuleFormLeafCondition;
+}
+
+describe('updateSignal banks', () => {
+  it('drops banks that the new signal cannot use, and the threshold', () => {
+    const result = switchTo(pdq, clip);
+    expect(result.signal).toEqual(clip);
+    expect(result.threshold).toBeUndefined();
+    expect(result.matchingValues).toEqual({ strings: ['kept'] });
+  });
+
+  it('keeps banks the new signal can use', () => {
+    const result = switchTo(
+      pdq,
+      makeSignal('pdq2', GQLSignalType.ImageSimilarityDoesNotMatch),
+    );
+    expect(result.matchingValues).toEqual({
+      imageBankIds: ['1'],
+      strings: ['kept'],
+    });
   });
 });

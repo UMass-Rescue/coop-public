@@ -4,6 +4,11 @@ import ComponentLoading from '../../../../../../components/common/ComponentLoadi
 import { selectFilterByLabelOption } from '@/webpages/dashboard/components/antDesignUtils';
 
 import { useGQLHashBanksQuery } from '../../../../../../graphql/generated';
+import {
+  hashBankInstanceForSignal,
+  UNAVAILABLE_BANK_HINT,
+  unavailableBanks,
+} from '../../../../rules/imageBankInstance';
 import { RuleFormLeafCondition } from '../../../../rules/types';
 import { ManualReviewQueueRoutingStaticTokenField } from '../../ManualReviewQueueRoutingStaticField';
 
@@ -22,8 +27,22 @@ export default function ManualReviewQueueRuleConditionMediaMatchingValues(props:
     allConditions = [],
   } = props;
 
-  const { loading, error, data } = useGQLHashBanksQuery();
-  const hashBanks = data?.hashBanks ?? [];
+  // Banks are created and hidden elsewhere, so don't trust a cached list.
+  const { loading, error, data } = useGQLHashBanksQuery({
+    fetchPolicy: 'cache-and-network',
+  });
+  const allHashBanks = data?.hashBanks ?? [];
+  // CLIP banks only work with the CLIP signal, and the rest with the others.
+  const bankInstance = hashBankInstanceForSignal(condition.signal);
+  const hashBanks = allHashBanks.filter(
+    (bank) => bank.hma_instance === bankInstance,
+  );
+  const selectedImageBankIds = condition.matchingValues?.imageBankIds;
+  const unavailable = unavailableBanks(
+    selectedImageBankIds,
+    hashBanks,
+    allHashBanks,
+  );
 
   // Get all selected bank IDs from other conditions
   const selectedBankIds = new Set(
@@ -44,8 +63,8 @@ export default function ManualReviewQueueRuleConditionMediaMatchingValues(props:
       {editing ? (
         <Select
           placeholder="Select media bank(s)"
-          defaultValue={condition.matchingValues?.imageBankIds}
-          value={condition.matchingValues?.imageBankIds}
+          defaultValue={selectedImageBankIds}
+          value={selectedImageBankIds}
           onChange={(values) => onUpdateSelectedBankIds([...values])}
           allowClear
           showSearch
@@ -62,12 +81,24 @@ export default function ManualReviewQueueRuleConditionMediaMatchingValues(props:
               {bank.name}
             </Option>
           ))}
+          {unavailable.map((bank) => (
+            <Option
+              key={bank.id}
+              value={bank.id}
+              label={bank.name}
+              title={UNAVAILABLE_BANK_HINT}
+            >
+              {bank.name}
+            </Option>
+          ))}
         </Select>
       ) : (
         <ManualReviewQueueRoutingStaticTokenField
           tokens={
-            condition.matchingValues?.imageBankIds?.map(
-              (id) => hashBanks.find((bank) => bank.id === id)?.name ?? id,
+            selectedImageBankIds?.map(
+              (id) =>
+                [...hashBanks, ...unavailable].find((bank) => bank.id === id)
+                  ?.name ?? id,
             ) ?? []
           }
         />

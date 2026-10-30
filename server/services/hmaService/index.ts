@@ -7,13 +7,14 @@ import { inject } from '../../iocContainer/utils.js';
 import { jsonStringify } from '../../utils/encoding.js';
 import { isUniqueViolationError } from '../../utils/kysely.js';
 import { makeMatchingBankNameExistsError } from '../moderationConfigService/modules/MatchingBankOperations.js';
-import type { HashBank } from './dbTypes.js';
+import { type OrgSettingsService } from '../orgSettingsService/orgSettingsService.js';
+import type { HashBank, HmaInstance } from './dbTypes.js';
 import { HashBankUserError, HmaRequestError } from './errors.js';
 import { HashBankService } from './hashBankService.js';
 
 // Export types for external use
-export type { HashBank } from './dbTypes.js';
-export { HashBankUserError } from './errors.js';
+export type { HashBank, HmaInstance } from './dbTypes.js';
+export { HashBankUserError, HmaRequestError } from './errors.js';
 export { HashBankService } from './hashBankService.js';
 
 export type ContentType = 'photo' | 'video';
@@ -34,6 +35,38 @@ export interface BankMatches {
 
 export interface LookupResponse {
   [bankName: string]: BankMatch[] | undefined;
+}
+
+const DEFAULT_CLIP_TIMEOUT_MS = 10_000;
+// A clip_float embedding is 4096 hex characters; this only bounds a bad response.
+const MAX_CLIP_EMBEDDING_LENGTH = 16_384;
+
+// Signal types computed by the optional CLIP HMA instance (CLIP_HMA_SERVICE_URL).
+// Every other signal type belongs to the default instance (HMA_SERVICE_URL).
+const CLIP_SIGNAL_TYPES: ReadonlySet<string> = new Set(['clip_float']);
+
+// Cosine distance at which HMA stops reporting a CLIP match. It is also
+// enforced locally so that scores below 0.90 never depend on how the CLIP
+// instance is configured.
+const CLIP_MAX_DISTANCE = 0.1;
+
+export function isClipSignalType(signalType: string): boolean {
+  return CLIP_SIGNAL_TYPES.has(signalType);
+}
+
+// HMA reports distances as strings. Blank or non-numeric ones are not
+// distances at all, which a bare Number() would hide ('' and null both become 0).
+function parseDistance(distance: unknown): number | undefined {
+  if (typeof distance !== 'string' || distance.trim() === '') {
+    return undefined;
+  }
+  const value = Number(distance);
+  return Number.isFinite(value) ? value : undefined;
+}
+
+function isDistanceWithin(distance: unknown, maxDistance: number): boolean {
+  const value = parseDistance(distance);
+  return value !== undefined && value <= maxDistance;
 }
 
 export interface ExchangeFieldDescriptor {
@@ -252,15 +285,34 @@ function validateExchangeCredentials(
 
 export class HmaService {
   private readonly hmaServiceUrl: string;
+  // Unset unless the optional CLIP HMA instance is deployed.
+  private readonly clipServiceUrl: string | undefined;
+  // fetchHTTP has no timeout by default, and a CLIP request that hangs would
+  // otherwise hold up the caller indefinitely.
+  private readonly clipTimeoutMs: number;
   private readonly hashBankService: HashBankService;
 
   constructor(
     private readonly fetchHTTP: Dependencies['fetchHTTP'],
     kyselyPg: Dependencies['KyselyPg'],
     private readonly tracer: Dependencies['Tracer'],
+    private readonly orgSettings: Pick<
+      OrgSettingsService,
+      'hasClipHashingEnabled'
+    >,
   ) {
     this.hmaServiceUrl =
       process.env.HMA_SERVICE_URL ?? 'http://localhost:9876/';
+    const clipUrl = process.env.CLIP_HMA_SERVICE_URL?.trim().replace(
+      /\/+$/,
+      '',
+    );
+    this.clipServiceUrl = clipUrl === '' ? undefined : clipUrl;
+    const clipTimeoutMs = Number(process.env.CLIP_HASH_TIMEOUT_MS);
+    this.clipTimeoutMs =
+      Number.isFinite(clipTimeoutMs) && clipTimeoutMs > 0
+        ? clipTimeoutMs
+        : DEFAULT_CLIP_TIMEOUT_MS;
     this.hashBankService = new HashBankService(kyselyPg);
   }
 
@@ -285,6 +337,7 @@ export class HmaService {
   private async pickHmaName(
     orgId: string,
     name: string,
+    instance: HmaInstance,
     currentHmaName?: string,
   ): Promise<string> {
     const base = this.getHmaName(orgId, name);
@@ -295,7 +348,7 @@ export class HmaService {
       }
       if (
         !(await this.hashBankService.isHmaNameTaken(candidate)) &&
-        !(await this.hmaBankExists(candidate))
+        !(await this.hmaBankExists(candidate, instance))
       ) {
         return candidate;
       }
@@ -303,9 +356,12 @@ export class HmaService {
     throw new Error(`No free HMA bank name for ${base}`);
   }
 
-  private async hmaBankExists(hmaName: string): Promise<boolean> {
+  private async hmaBankExists(
+    hmaName: string,
+    instance: HmaInstance,
+  ): Promise<boolean> {
     const response = await this.fetchHTTP({
-      url: `${this.hmaServiceUrl}/c/bank/${encodeURIComponent(hmaName)}`,
+      url: `${this.urlFor(instance)}/c/bank/${encodeURIComponent(hmaName)}`,
       method: 'get',
       handleResponseBody: 'discard',
     });
@@ -328,11 +384,30 @@ export class HmaService {
       apiJson: Record<string, unknown>;
       credentialJson?: ExchangeCredentialJson;
     },
+    instance: HmaInstance = 'DEFAULT',
   ): Promise<HashBank> {
+    if (instance === 'CLIP') {
+      if (!this.isClipEnabled()) {
+        throw new HashBankUserError(
+          'CLIP is not available: this deployment has no CLIP HMA instance.',
+        );
+      }
+      // Checked apart from isClipAvailableToOrg to give a separate message.
+      if (!(await this.orgSettings.hasClipHashingEnabled(orgId))) {
+        throw new HashBankUserError(
+          'CLIP is turned off for your organization. Turn it on under Settings, Image Matching.',
+        );
+      }
+      if (exchange) {
+        throw new HashBankUserError(
+          'CLIP banks cannot be connected to an exchange.',
+        );
+      }
+    }
     if (await this.hashBankService.findByName(name, orgId)) {
       throw makeMatchingBankNameExistsError({ shouldErrorSpan: false });
     }
-    const hmaName = await this.pickHmaName(orgId, name);
+    const hmaName = await this.pickHmaName(orgId, name, instance);
 
     if (exchange) {
       const credentialJson = validateExchangeCredentials(
@@ -355,7 +430,7 @@ export class HmaService {
           error instanceof HashBankUserError ||
           (error instanceof HmaRequestError && error.status < 500);
         if (!rejected) {
-          await this.deleteHmaBank(hmaName, true);
+          await this.deleteHmaBank(hmaName, true, instance);
         }
         throw error;
       }
@@ -366,7 +441,7 @@ export class HmaService {
       };
 
       const response = await this.fetchHTTP({
-        url: `${this.hmaServiceUrl}/c/banks`,
+        url: `${this.urlFor(instance)}/c/banks`,
         method: 'post',
         body: jsonStringify(requestBody),
         headers: { 'Content-Type': 'application/json' },
@@ -378,7 +453,7 @@ export class HmaService {
           status: response.status,
           responseBody: response.body,
           requestBody,
-          url: `${this.hmaServiceUrl}/c/banks`,
+          url: `${this.urlFor(instance)}/c/banks`,
           headers: response.headers,
         };
         throw new Error(
@@ -409,12 +484,13 @@ export class HmaService {
         hma_name: hmaName,
         description,
         enabled_ratio,
+        hma_instance: instance,
         org_id: orgId,
       });
 
       return bank;
     } catch (error) {
-      await this.deleteHmaBank(hmaName, exchange != null);
+      await this.deleteHmaBank(hmaName, exchange != null, instance);
       throw isUniqueViolationError(error)
         ? makeMatchingBankNameExistsError({ shouldErrorSpan: false })
         : error;
@@ -429,13 +505,14 @@ export class HmaService {
   private async deleteHmaBank(
     hmaName: string,
     isExchange: boolean,
+    instance: HmaInstance,
   ): Promise<void> {
     try {
       // Deleting only the bank would leave an exchange and its credentials.
       const response = await this.fetchHTTP({
         url: isExchange
-          ? `${this.hmaServiceUrl}/c/exchange/${encodeURIComponent(hmaName)}`
-          : `${this.hmaServiceUrl}/c/bank/${encodeURIComponent(hmaName)}`,
+          ? `${this.urlFor(instance)}/c/exchange/${encodeURIComponent(hmaName)}`
+          : `${this.urlFor(instance)}/c/bank/${encodeURIComponent(hmaName)}`,
         method: 'delete',
         handleResponseBody: 'discard',
       });
@@ -461,6 +538,7 @@ export class HmaService {
     if (!bank) {
       throw new Error('Bank not found');
     }
+    await this.assertUsable(bank);
 
     const newName =
       updates.name != null && updates.name !== bank.name
@@ -476,10 +554,14 @@ export class HmaService {
 
     // PUT /c/bank renames in place, so the bank keeps its hashed content.
     if (newHmaName != null || newRatio != null) {
-      await this.updateHmaBank(bank.hma_name, {
-        ...(newHmaName != null ? { name: newHmaName } : {}),
-        ...(newRatio != null ? { enabled_ratio: newRatio } : {}),
-      });
+      await this.updateHmaBank(
+        bank.hma_name,
+        {
+          ...(newHmaName != null ? { name: newHmaName } : {}),
+          ...(newRatio != null ? { enabled_ratio: newRatio } : {}),
+        },
+        bank.hma_instance,
+      );
     }
 
     const fieldsToUpdate: {
@@ -514,11 +596,13 @@ export class HmaService {
     } catch (error) {
       if (newHmaName != null) {
         // Without this, Coop's row would point at a name HMA no longer has.
-        await this.updateHmaBank(newHmaName, { name: bank.hma_name }).catch(
-          (revertError: unknown) => {
-            this.tracer.logActiveSpanFailedIfAny(revertError);
-          },
-        );
+        await this.updateHmaBank(
+          newHmaName,
+          { name: bank.hma_name },
+          bank.hma_instance,
+        ).catch((revertError: unknown) => {
+          this.tracer.logActiveSpanFailedIfAny(revertError);
+        });
       }
       throw isUniqueViolationError(error)
         ? makeMatchingBankNameExistsError({ shouldErrorSpan: false })
@@ -540,12 +624,13 @@ export class HmaService {
     }
     // HMA can't rename an exchange, and Coop finds a bank's exchange by its
     // HMA name, so exchange-backed banks keep their original one.
-    if (await this.hasExchange(bank.hma_name)) {
+    if (await this.hasExchange(bank.hma_name, bank.hma_instance)) {
       return undefined;
     }
     const newHmaName = await this.pickHmaName(
       bank.org_id,
       newName,
+      bank.hma_instance,
       bank.hma_name,
     );
     return newHmaName === bank.hma_name ? undefined : newHmaName;
@@ -554,9 +639,10 @@ export class HmaService {
   private async updateHmaBank(
     hmaName: string,
     changes: { name?: string; enabled_ratio?: number },
+    instance: HmaInstance,
   ): Promise<void> {
     const response = await this.fetchHTTP({
-      url: `${this.hmaServiceUrl}/c/bank/${encodeURIComponent(hmaName)}`,
+      url: `${this.urlFor(instance)}/c/bank/${encodeURIComponent(hmaName)}`,
       method: 'put',
       body: jsonStringify(changes),
       headers: { 'Content-Type': 'application/json' },
@@ -578,12 +664,14 @@ export class HmaService {
     if (!bank) {
       throw new Error('Bank not found');
     }
+    await this.assertUsable(bank);
 
     // DELETE /c/bank on an exchange-backed bank leaves the exchange and its
     // credentials in HMA, so those must go through DELETE /c/exchange.
-    const url = (await this.hasExchange(bank.hma_name))
-      ? `${this.hmaServiceUrl}/c/exchange/${encodeURIComponent(bank.hma_name)}`
-      : `${this.hmaServiceUrl}/c/bank/${encodeURIComponent(bank.hma_name)}`;
+    const base = this.urlFor(bank.hma_instance);
+    const url = (await this.hasExchange(bank.hma_name, bank.hma_instance))
+      ? `${base}/c/exchange/${encodeURIComponent(bank.hma_name)}`
+      : `${base}/c/bank/${encodeURIComponent(bank.hma_name)}`;
 
     const response = await this.fetchHTTP({
       url,
@@ -600,12 +688,22 @@ export class HmaService {
     await this.hashBankService.delete(Number(bank.id), orgId);
   }
 
-  private async hasExchange(hmaName: string): Promise<boolean> {
-    return (await this.getExchangeApiName(hmaName)) != null;
+  private async hasExchange(
+    hmaName: string,
+    instance: HmaInstance,
+  ): Promise<boolean> {
+    return (await this.getExchangeApiName(hmaName, instance)) != null;
   }
 
   /** The exchange API type of an exchange-backed bank, or null for plain banks. */
-  private async getExchangeApiName(hmaName: string): Promise<string | null> {
+  private async getExchangeApiName(
+    hmaName: string,
+    instance: HmaInstance,
+  ): Promise<string | null> {
+    // The CLIP instance has no exchanges.
+    if (instance === 'CLIP') {
+      return null;
+    }
     const response = await this.fetchHTTP({
       url: `${this.hmaServiceUrl}/c/exchange/${encodeURIComponent(hmaName)}`,
       method: 'get',
@@ -628,14 +726,15 @@ export class HmaService {
     // Get local bank
     const bank = await this.hashBankService.findByName(name, orgId);
 
-    if (!bank) {
+    if (!bank || !(await this.isUsable(bank))) {
       return null;
     }
 
     // Verify bank exists in HMA service
     try {
       const response = await this.fetchHTTP({
-        url: `${this.hmaServiceUrl}/c/bank/${bank.hma_name}`,
+        url: `${this.urlFor(bank.hma_instance)}/c/bank/${bank.hma_name}`,
+        timeoutMs: this.timeoutFor(bank.hma_instance),
         method: 'get',
         handleResponseBody: 'discard',
       });
@@ -666,6 +765,12 @@ export class HmaService {
    * row is kept if that fails. Returns whether the row was dropped.
    */
   private async forgetMissingBank(bank: HashBank): Promise<boolean> {
+    // A CLIP instance that was repointed, reset or fronted by a gateway answers
+    // 404 for banks that still exist, and forgetting them would drop every CLIP
+    // bank row. They are only removed through deleteBank.
+    if (bank.hma_instance === 'CLIP') {
+      return false;
+    }
     const response = await this.fetchHTTP({
       url: `${this.hmaServiceUrl}/c/exchange/${encodeURIComponent(bank.hma_name)}`,
       method: 'delete',
@@ -688,14 +793,15 @@ export class HmaService {
     // Get local bank by ID
     const bank = await this.hashBankService.findById(id, orgId);
 
-    if (!bank) {
+    if (!bank || !(await this.isUsable(bank))) {
       return null;
     }
 
     // Verify bank exists in HMA service
     try {
       const response = await this.fetchHTTP({
-        url: `${this.hmaServiceUrl}/c/bank/${bank.hma_name}`,
+        url: `${this.urlFor(bank.hma_instance)}/c/bank/${bank.hma_name}`,
+        timeoutMs: this.timeoutFor(bank.hma_instance),
         method: 'get',
         handleResponseBody: 'discard',
       });
@@ -722,14 +828,28 @@ export class HmaService {
   async listBanks(orgId: string): Promise<HashBank[]> {
     try {
       // Get all local banks for org
-      const banks = await this.hashBankService.findAllByOrgId(orgId);
+      const allBanks = await this.hashBankService.findAllByOrgId(orgId);
+      // One settings read per call, and none for orgs without CLIP banks. If
+      // the read fails, hide only the CLIP banks rather than losing every bank.
+      const clipAvailable = allBanks.some(
+        (bank) => bank.hma_instance === 'CLIP',
+      )
+        ? await this.isClipAvailableToOrg(orgId).catch((error: unknown) => {
+            this.tracer.logActiveSpanFailedIfAny(error);
+            return false;
+          })
+        : false;
+      const banks = allBanks.filter(
+        (bank) => bank.hma_instance !== 'CLIP' || clipAvailable,
+      );
 
       // Filter out banks that don't exist in HMA service
       const validBanks = await Promise.all(
         banks.map(async (bank) => {
           try {
             const response = await this.fetchHTTP({
-              url: `${this.hmaServiceUrl}/c/bank/${bank.hma_name}`,
+              url: `${this.urlFor(bank.hma_instance)}/c/bank/${bank.hma_name}`,
+              timeoutMs: this.timeoutFor(bank.hma_instance),
               method: 'get',
               headers: {
                 'Content-Type': 'application/json',
@@ -918,7 +1038,10 @@ export class HmaService {
       throw new HashBankUserError('Hash bank not found.');
     }
 
-    const apiName = await this.getExchangeApiName(bank.hma_name);
+    const apiName = await this.getExchangeApiName(
+      bank.hma_name,
+      bank.hma_instance,
+    );
     if (apiName == null) {
       throw new HashBankUserError('This bank is not connected to an exchange.');
     }
@@ -935,7 +1058,14 @@ export class HmaService {
     return this.setExchangeCredentials(bank.hma_name, validated);
   }
 
-  async getExchangeForBank(hmaName: string): Promise<ExchangeInfo | null> {
+  async getExchangeForBank(
+    hmaName: string,
+    instance: HmaInstance = 'DEFAULT',
+  ): Promise<ExchangeInfo | null> {
+    // The CLIP instance has no exchanges.
+    if (instance === 'CLIP') {
+      return null;
+    }
     let response;
     try {
       response = await this.fetchHTTP({
@@ -1020,6 +1150,113 @@ export class HmaService {
     }
 
     return response.body as unknown as Record<string, string>;
+  }
+
+  /** Whether this deployment has the optional CLIP instance, for any org. */
+  isClipEnabled(): boolean {
+    return this.clipServiceUrl != null;
+  }
+
+  /**
+   * Whether CLIP is on for an org: the deployment has the CLIP instance and the
+   * org has turned CLIP hashing on. This single check decides whether the org
+   * can see and use CLIP banks.
+   */
+  async isClipAvailableToOrg(orgId: string): Promise<boolean> {
+    return (
+      this.isClipEnabled() &&
+      (await this.orgSettings.hasClipHashingEnabled(orgId))
+    );
+  }
+
+  private requireClipUrl(): string {
+    if (this.clipServiceUrl == null) {
+      throw new Error('CLIP_HMA_SERVICE_URL is not set');
+    }
+    return this.clipServiceUrl;
+  }
+
+  private urlFor(instance: HmaInstance): string {
+    return instance === 'CLIP' ? this.requireClipUrl() : this.hmaServiceUrl;
+  }
+
+  /** Only the CLIP instance gets a timeout; the default instance is unchanged. */
+  private timeoutFor(instance: HmaInstance): number | undefined {
+    return instance === 'CLIP' ? this.clipTimeoutMs : undefined;
+  }
+
+  /** CLIP banks are hidden, not deleted, while CLIP is off for their org. */
+  private async isUsable(bank: HashBank): Promise<boolean> {
+    return (
+      bank.hma_instance !== 'CLIP' ||
+      (await this.isClipAvailableToOrg(bank.org_id))
+    );
+  }
+
+  private async assertUsable(bank: HashBank): Promise<void> {
+    if (!(await this.isUsable(bank))) {
+      throw new HashBankUserError(
+        'This bank uses CLIP, which is not turned on for your organization.',
+      );
+    }
+  }
+
+  /** Hashes an image with the CLIP HMA instance, e.g. `{ clip_float: '...' }`. */
+  async hashClipFromUrl(url: string): Promise<Record<string, string>> {
+    const response = await this.fetchHTTP({
+      url: `${this.requireClipUrl()}/h/hash?url=${encodeURIComponent(url)}`,
+      method: 'get',
+      handleResponseBody: 'as-json',
+      timeoutMs: this.clipTimeoutMs,
+    });
+
+    if (!response.ok) {
+      throw new HmaRequestError(
+        'Failed to hash content with CLIP',
+        response.status,
+      );
+    }
+
+    // Keep only the embedding we expect: whatever is returned is stored on the
+    // item, and each key would be used as a signal type for lookups.
+    const embedding = (response.body as { clip_float?: unknown } | null)
+      ?.clip_float;
+    if (
+      typeof embedding !== 'string' ||
+      embedding.length > MAX_CLIP_EMBEDDING_LENGTH ||
+      !/^[0-9a-f]+$/i.test(embedding)
+    ) {
+      throw new Error('Unexpected response from the CLIP instance');
+    }
+    return { clip_float: embedding };
+  }
+
+  /**
+   * CLIP hashes are ~4 KB of hex, which exceeds the web server's request-line
+   * limit as a query string, so unlike lookupContent this is a JSON POST.
+   */
+  private async lookupClipSignal(
+    banks: string[],
+    signalType: string,
+    signal: string,
+  ): Promise<LookupResponse> {
+    const response = await this.fetchHTTP({
+      url: `${this.requireClipUrl()}/m/lookup`,
+      method: 'post',
+      body: jsonStringify({ signal_type: signalType, signal, banks }),
+      headers: { 'Content-Type': 'application/json' },
+      handleResponseBody: 'as-json',
+      timeoutMs: this.clipTimeoutMs,
+    });
+
+    if (!response.ok) {
+      throw new HmaRequestError(
+        'Failed to look up content with CLIP',
+        response.status,
+      );
+    }
+
+    return response.body as unknown as LookupResponse;
   }
 
   async addContentToBank(
@@ -1128,34 +1365,102 @@ export class HmaService {
    * Checks if an image matches any images in any of the provided hash banks
    * and returns detailed match information
    * @param hmaBankIds Array of hash bank IDs to check against
-   * @param signalType The type of signal (e.g. 'pdq', 'md5', etc.)
+   * @param signalType The type of signal (e.g. 'pdq', 'md5', 'clip_float').
+   * CLIP signals are looked up on the CLIP HMA instance, and never match when
+   * it is not configured.
    * @param signal The hash value to check
+   * @param options.maxDistance Ignore matches farther than this, in the units
+   * of the signal type (cosine distance for clip_float). HMA already applies
+   * its own cutoff per signal type (0.10 for clip_float), so this can only
+   * tighten matching, not loosen it. A match whose distance is missing or not
+   * a number never satisfies it.
    * @returns A promise that resolves to an object with matched status and list of matched banks
    */
   async checkImageMatchWithDetails(
     hmaBankIds: string[],
     signalType: string,
     signal: string,
+    options: { maxDistance?: number } = {},
   ): Promise<{ matched: boolean; matchedBanks: string[] }> {
-    const matches: LookupResponse = await this.lookupContent({
-      signal,
-      signalType,
-    });
-
-    const matchedBanks: string[] = [];
-
-    // Check which banks have matches
-    hmaBankIds.forEach((bankId) => {
-      const bankMatches = matches[bankId];
-      if (bankMatches && bankMatches.length > 0) {
-        // TODO: Implement some configuration for the distance threshold
-        matchedBanks.push(bankId);
+    let matches: LookupResponse;
+    if (isClipSignalType(signalType)) {
+      // HMA reads an empty bank list as "search every bank".
+      if (!this.isClipEnabled() || hmaBankIds.length === 0) {
+        return { matched: false, matchedBanks: [] };
       }
+      matches = await this.lookupClipSignal(hmaBankIds, signalType, signal);
+    } else {
+      matches = await this.lookupContent({ signal, signalType });
+    }
+
+    const { maxDistance } = options;
+    const matchedBanks = hmaBankIds.filter((bankId) => {
+      const bankMatches = matches[bankId];
+      return (
+        Array.isArray(bankMatches) &&
+        bankMatches.some(
+          (match) =>
+            maxDistance == null ||
+            isDistanceWithin(match.distance, maxDistance),
+        )
+      );
     });
 
     return {
       matched: matchedBanks.length > 0,
       matchedBanks,
+    };
+  }
+
+  /**
+   * Finds how close a CLIP embedding is to the images in the given CLIP banks.
+   * Returns the closest cosine distance (0 is identical) and the banks that
+   * had a match. Only matches within cosine distance 0.10 count, whatever the
+   * CLIP instance's own cutoff is, so a distance is only ever reported for
+   * images that are close enough.
+   * Matches without a usable distance are ignored, since they cannot be scored.
+   * With CLIP not deployed, or no banks to look in, nothing matches.
+   * @param hmaBankIds HMA names of the CLIP banks to look in
+   * @param embedding The hex clip_float embedding of the image
+   */
+  async findClosestClipMatch(
+    hmaBankIds: string[],
+    embedding: string,
+  ): Promise<{
+    matchedBanks: string[];
+    closestDistance: number | undefined;
+  }> {
+    // HMA reads an empty bank list as "search every bank".
+    if (!this.isClipEnabled() || hmaBankIds.length === 0) {
+      return { matchedBanks: [], closestDistance: undefined };
+    }
+    const matches = await this.lookupClipSignal(
+      hmaBankIds,
+      'clip_float',
+      embedding,
+    );
+
+    const distancesByBank = hmaBankIds.map((bankId) => {
+      const bankMatches = matches[bankId];
+      return {
+        bankId,
+        distances: Array.isArray(bankMatches)
+          ? bankMatches
+              .map((match) => parseDistance(match.distance))
+              .filter((distance) => distance !== undefined)
+              .filter((distance) => distance <= CLIP_MAX_DISTANCE)
+          : [],
+      };
+    });
+    const matchedBanks = distancesByBank
+      .filter(({ distances }) => distances.length > 0)
+      .map(({ bankId }) => bankId);
+    const allDistances = distancesByBank.flatMap(({ distances }) => distances);
+
+    return {
+      matchedBanks,
+      closestDistance:
+        allDistances.length > 0 ? Math.min(...allDistances) : undefined,
     };
   }
 
@@ -1181,4 +1486,7 @@ export class HmaService {
   }
 }
 
-export default inject(['fetchHTTP', 'KyselyPg', 'Tracer'], HmaService);
+export default inject(
+  ['fetchHTTP', 'KyselyPg', 'Tracer', 'OrgSettingsService'],
+  HmaService,
+);

@@ -67,6 +67,10 @@ const typeDefs = /* GraphQL */ `
     """
     ncmecMinMediaToReview: Int!
     hasAppealsEnabled: Boolean!
+    "Whether this org hashes images with CLIP and can use CLIP hash banks."
+    hasClipHashingEnabled: Boolean!
+    "Whether this deployment has the optional CLIP instance, so the setting can be turned on."
+    clipHashingAvailable: Boolean!
     ncmecReports: [NCMECReport!]!
     """
     NCMEC decisions that did not produce a successful CyberTip report. Returned
@@ -177,6 +181,7 @@ const typeDefs = /* GraphQL */ `
     updateSSOCredentials(input: UpdateSSOCredentialsInput!): Boolean!
     updateOrgInfo(input: UpdateOrgInfoInput!): UpdateOrgInfoSuccessResponse!
     updateHasAppealsEnabled(enabled: Boolean!): Boolean!
+    updateHasClipHashingEnabled(enabled: Boolean!): Boolean!
     updateHasReportingRulesEnabled(enabled: Boolean!): Boolean!
     updateAllowMultiplePoliciesPerAction(enabled: Boolean!): Boolean!
     updateSamlEnabled(enabled: Boolean!): Boolean!
@@ -501,6 +506,20 @@ const Org: GQLOrgResolvers = {
       throw unauthenticatedError('User required.');
     }
     return context.services.OrgSettingsService.hasAppealsEnabled(org.id);
+  },
+  async hasClipHashingEnabled(org, _, context) {
+    const user = context.getUser();
+    if (!user || user.orgId !== org.id) {
+      throw unauthenticatedError('User required.');
+    }
+    return context.services.OrgSettingsService.hasClipHashingEnabled(org.id);
+  },
+  async clipHashingAvailable(org, _, context) {
+    const user = context.getUser();
+    if (!user || user.orgId !== org.id) {
+      throw unauthenticatedError('User required.');
+    }
+    return context.services.HMAHashBankService.isClipEnabled();
   },
   async userStrikeTTL(org, _, context) {
     const user = context.getUser();
@@ -1001,6 +1020,27 @@ const Mutation: GQLMutationResolvers = {
       );
     }
     await context.services.OrgSettingsService.updateHasAppealsEnabled({
+      orgId: user.orgId,
+      enabled,
+    });
+    return true;
+  },
+  async updateHasClipHashingEnabled(_, { enabled }, context) {
+    const user = context.getUser();
+    if (!user) {
+      throw unauthenticatedError('User required.');
+    }
+    if (!user.getPermissions().includes(UserPermission.MANAGE_ORG)) {
+      throw forbiddenError(
+        'User does not have permission to update org settings',
+      );
+    }
+    if (enabled && !context.services.HMAHashBankService.isClipEnabled()) {
+      throw userInputError(
+        'CLIP is not available: this deployment has no CLIP HMA instance.',
+      );
+    }
+    await context.services.OrgSettingsService.updateHasClipHashingEnabled({
       orgId: user.orgId,
       enabled,
     });

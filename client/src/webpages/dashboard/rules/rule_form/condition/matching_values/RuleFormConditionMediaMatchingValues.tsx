@@ -4,6 +4,11 @@ import ComponentLoading from '../../../../../../components/common/ComponentLoadi
 import { selectFilterByLabelOption } from '@/webpages/dashboard/components/antDesignUtils';
 
 import { useGQLHashBanksQuery } from '../../../../../../graphql/generated';
+import {
+  hashBankInstanceForSignal,
+  UNAVAILABLE_BANK_HINT,
+  unavailableBanks,
+} from '../../../imageBankInstance';
 import { ConditionLocation, RuleFormLeafCondition } from '../../../types';
 
 const { Option } = Select;
@@ -24,8 +29,22 @@ export default function RuleFormConditionMediaMatchingValues(props: {
   } = props;
   const { conditionSetIndex, conditionIndex } = location;
 
-  const { loading, error, data } = useGQLHashBanksQuery();
-  const hashBanks = data?.hashBanks ?? [];
+  // Banks are created and hidden elsewhere, so don't trust a cached list.
+  const { loading, error, data } = useGQLHashBanksQuery({
+    fetchPolicy: 'cache-and-network',
+  });
+  // CLIP banks only work with the CLIP signal, and the rest with the others.
+  const bankInstance = hashBankInstanceForSignal(condition.signal);
+  const allHashBanks = data?.hashBanks ?? [];
+  const hashBanks = allHashBanks.filter(
+    (bank) => bank.hma_instance === bankInstance,
+  );
+  const selectedImageBankIds = condition.matchingValues?.imageBankIds;
+  const unavailable = unavailableBanks(
+    selectedImageBankIds,
+    hashBanks,
+    allHashBanks,
+  );
 
   // Get all selected bank IDs from other conditions
   const selectedBankIds = new Set(
@@ -52,8 +71,8 @@ export default function RuleFormConditionMediaMatchingValues(props: {
         <Select
           mode="multiple"
           placeholder="Select media bank(s)"
-          defaultValue={condition.matchingValues?.imageBankIds}
-          value={condition.matchingValues?.imageBankIds}
+          defaultValue={selectedImageBankIds}
+          value={selectedImageBankIds}
           onChange={(values) => {
             // Filter out any duplicate values
             const uniqueValues = Array.from(new Set(values));
@@ -70,6 +89,16 @@ export default function RuleFormConditionMediaMatchingValues(props: {
               value={bank.id}
               label={bank.name}
               disabled={selectedBankIds.has(bank.id)}
+            >
+              {bank.name}
+            </Option>
+          ))}
+          {unavailable.map((bank) => (
+            <Option
+              key={bank.id}
+              value={bank.id}
+              label={bank.name}
+              title={UNAVAILABLE_BANK_HINT}
             >
               {bank.name}
             </Option>

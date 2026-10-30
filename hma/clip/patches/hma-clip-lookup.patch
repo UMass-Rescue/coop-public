@@ -1,0 +1,282 @@
+diff --git a/hasher-matcher-actioner/src/OpenMediaMatch/blueprints/matching.py b/hasher-matcher-actioner/src/OpenMediaMatch/blueprints/matching.py
+index 7d94e3ed..f50ab645 100644
+--- a/hasher-matcher-actioner/src/OpenMediaMatch/blueprints/matching.py
++++ b/hasher-matcher-actioner/src/OpenMediaMatch/blueprints/matching.py
+@@ -27,6 +27,7 @@ from OpenMediaMatch.storage import interface
+ from OpenMediaMatch.blueprints import hashing
+ from OpenMediaMatch.utils.flask_utils import (
+     api_error_handler,
++    require_param_from_dict,
+     require_request_param,
+     str_to_bool,
+ )
+@@ -152,6 +153,100 @@ def raw_lookup():
+     return {"matches": lookup_signal_func(signal, signal_type_name, requested_banks)}
+ 
+ 
++@bp.route("/lookup_threshold", methods=["GET", "POST"])
++def lookup_threshold():
++    """
++    Look up a hash in the similarity index using a custom threshold.
++
++    This endpoint allows querying with a specific similarity threshold
++    instead of using the default threshold for the signal type.
++
++    Input:
++     * Signal type (hash type)
++     * Signal value (the hash)
++     * Threshold (int) - maximum distance for matches (required)
++    Output:
++     * List of matching with content_id and distance values
++    """
++
++    if request.method == "POST":
++        if request.is_json:
++            params = request.get_json()
++            if not isinstance(params, dict):
++                abort(400, "Request input was not a dict")
++        else:
++            params = request.form
++    else:  # GET
++        params = request.args
++
++    signal = require_param_from_dict(params, "signal")
++    signal_type_name = require_param_from_dict(params, "signal_type")
++    threshold_str = require_param_from_dict(params, "threshold")
++
++    try:
++        # Try to parse as float first (which works for both int and float)
++        threshold = float(threshold_str)
++        # If it's actually an integer value, convert to int
++        if threshold.is_integer():
++            threshold = int(threshold)
++    except (ValueError, TypeError):
++        abort(400, "threshold must be a number (int or float)")
++
++    results = query_index_threshold(signal, signal_type_name, threshold)
++    matches = [
++        {
++            "bank_content_id": m.metadata,
++            "distance": m.similarity_info.pretty_str(),
++        }
++        for m in results
++    ]
++    return {"matches": matches}
++
++
++@bp.route("/lookup_topk", methods=["GET", "POST"])
++def lookup_topk():
++    """
++    Look up the top K closest matches for a hash in the similarity index.
++
++    This endpoint returns the K closest matches regardless of threshold.
++
++    Input:
++     * Signal type (hash type)
++     * Signal value (the hash)
++     * k (int) - number of top matches to return (required)
++    Output:
++     * List of matching with content_id and distance values
++    """
++    if request.method == "POST":
++        if request.is_json:
++            params = request.get_json()
++            if not isinstance(params, dict):
++                abort(400, "Request input was not a dict")
++        else:
++            params = request.form
++    else:  # GET
++        params = request.args
++
++    signal = require_param_from_dict(params, "signal")
++    signal_type_name = require_param_from_dict(params, "signal_type")
++    k_str = require_param_from_dict(params, "k")
++
++    try:
++        k = int(k_str)
++    except (ValueError, TypeError):
++        abort(400, "k must be an integer")
++
++    results = query_index_topk(signal, signal_type_name, k)
++    matches = [
++        {
++            "bank_content_id": m.metadata,
++            "distance": m.similarity_info.pretty_str(),
++        }
++        for m in results
++    ]
++    return {"matches": matches}
++
++
+ def query_index(
+     signal: str, signal_type_name: str
+ ) -> t.Sequence[IndexMatchUntyped[SignalSimilarityInfo, int]]:
+@@ -173,6 +268,58 @@ def query_index(
+     return results
+ 
+ 
++def query_index_threshold(
++    signal: str, signal_type_name: str, threshold: t.Union[int, float]
++) -> t.Sequence[IndexMatchUntyped[SignalSimilarityInfo, int]]:
++    storage = get_storage()
++    signal_type = _validate_and_transform_signal_type(signal_type_name, storage)
++
++    try:
++        signal = signal_type.validate_signal_str(signal)
++    except Exception as e:
++        abort(400, f"invalid signal: {e}")
++
++    index = _get_index(signal_type)
++
++    if index is None:
++        abort(503, "index not yet ready")
++    if not hasattr(index, "query_threshold"):
++        abort(
++            501,
++            f"Signal type '{signal_type_name}' does not support query_threshold method",
++        )
++    current_app.logger.debug("[lookup_signal_threshold] querying index")
++    results = index.query_threshold(signal, threshold)  # type: ignore[attr-defined]
++    current_app.logger.debug("[lookup_signal_threshold] query complete")
++    return results
++
++
++def query_index_topk(
++    signal: str, signal_type_name: str, k: int
++) -> t.Sequence[IndexMatchUntyped[SignalSimilarityInfo, int]]:
++    storage = get_storage()
++    signal_type = _validate_and_transform_signal_type(signal_type_name, storage)
++
++    try:
++        signal = signal_type.validate_signal_str(signal)
++    except Exception as e:
++        abort(400, f"invalid signal: {e}")
++
++    index = _get_index(signal_type)
++
++    if index is None:
++        abort(503, "index not yet ready")
++    if not hasattr(index, "query_top_k"):
++        abort(
++            501,
++            f"Signal type '{signal_type_name}' does not support query_top_k method",
++        )
++    current_app.logger.debug("[lookup_signal_topk] querying index")
++    results = index.query_top_k(signal, k)  # type: ignore[attr-defined]
++    current_app.logger.debug("[lookup_signal_topk] query complete")
++    return results
++
++
+ def lookup_signal(
+     signal: str, signal_type_name: str, banks: t.Optional[t.Set[str]] = None
+ ) -> list[int]:
+@@ -299,36 +446,68 @@ def lookup_get() -> t.Union[TMatchByBank, TBankMatchBySignalType]:
+ 
+ 
+ @bp.route("/lookup", methods=["POST"])
+-def lookup_post() -> TBankMatchBySignalType:
++def lookup_post() -> t.Union[TMatchByBank, TBankMatchBySignalType]:
+     """
+-    Look up the hash for the uploaded file in the similarity index.
+-    @see OpenMediaMatch.blueprints.hashing hash_media_from_form_data()
++    Look up a signal in the similarity index. The signal can be provided
++    directly in a JSON body, or a file can be uploaded to be hashed.
+ 
+     Input:
++     Either (as JSON):
++     * Signal type (hash type)
++     * Signal value (the hash)
++     Or (as multipart/form-data):
+      * Uploaded file.
++
++     Also (applies to both cases):
+      * Optional seed (content id) for consistent coinflip
++     * Optional list of banks to restrict search to
+     Output:
+-     * JSON object keyed by signal type to bank matches
++     * If a signal and signal_type are provided in a JSON POST, returns a
++       JSON object of bank matches (TMatchByBank).
++     * If a file is uploaded, returns a JSON object keyed by signal
++       type to bank matches (TBankMatchBySignalType).
+        (@see lookup_get)
+     """
+-    if not current_app.config.get("ROLE_HASHER", False):
+-        abort(403, "Hashing is disabled, missing role")
++    if request.is_json:
++        # Direct signal lookup
++        data = request.get_json()
++        if not isinstance(data, dict):
++            abort(400, "Request input was not a dict")
++        signal = require_param_from_dict(data, "signal")
++        signal_type_name = require_param_from_dict(data, "signal_type")
++
++        bypass_coinflip = data.get("bypass_coinflip", False)
++        banks_param = data.get("banks")
++        if isinstance(banks_param, str):
++            banks_param = banks_param.split(",")
++        elif banks_param is not None and not (
++            isinstance(banks_param, list)
++            and all(isinstance(bank, str) for bank in banks_param)
++        ):
++            abort(400, "banks must be a comma-separated string or a list of strings")
++        requested_banks = set(banks_param) if banks_param else None
++
++        return lookup(signal, signal_type_name, bypass_coinflip, requested_banks)
++    else:
++        # File upload lookup
++        if not current_app.config.get("ROLE_HASHER", False):
++            abort(403, "Hashing is disabled, missing role")
+ 
+-    hashes = hashing.hash_media_from_form_data()
+-    bypass_coinflip = request.args.get("bypass_coinflip", "false") == "true"
++        hashes = hashing.hash_media_from_form_data()
++        bypass_coinflip = request.args.get("bypass_coinflip", "false") == "true"
+ 
+-    # Parse optional banks parameter
+-    banks_param = request.args.get("banks")
+-    requested_banks = set(banks_param.split(",")) if banks_param else None
++        # Parse optional banks parameter
++        banks_param = request.args.get("banks")
++        requested_banks = set(banks_param.split(",")) if banks_param else None
+ 
+-    resp = {}
+-    for signal_type in hashes.keys():
+-        signal = hashes[signal_type]
+-        resp[signal_type] = lookup(
+-            signal, signal_type, bypass_coinflip, requested_banks
+-        )
++        resp = {}
++        for signal_type in hashes.keys():
++            signal = hashes[signal_type]
++            resp[signal_type] = lookup(
++                signal, signal_type, bypass_coinflip, requested_banks
++            )
+ 
+-    return resp
++        return resp
+ 
+ 
+ def lookup(
+diff --git a/hasher-matcher-actioner/src/OpenMediaMatch/utils/flask_utils.py b/hasher-matcher-actioner/src/OpenMediaMatch/utils/flask_utils.py
+index d2707683..dcecdfd0 100644
+--- a/hasher-matcher-actioner/src/OpenMediaMatch/utils/flask_utils.py
++++ b/hasher-matcher-actioner/src/OpenMediaMatch/utils/flask_utils.py
+@@ -36,6 +36,18 @@ def require_request_param(name: str) -> str:
+     return ret
+ 
+ 
++def require_param_from_dict(params: t.Mapping[str, t.Any], name: str) -> str:
++    """
++    Wrapper around a required parameter from a params dict.
++
++    aborts with 400 if it's missing.
++    """
++    ret = params.get(name)
++    if ret is None:
++        abort(400, f"{name} is required")
++    return ret
++
++
+ def require_json_param(name: str) -> str:
+     """
+     Wrapper around a required POST json parameter.

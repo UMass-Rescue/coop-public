@@ -18,6 +18,7 @@ export class HashBankService {
         hma_name: input.hma_name,
         description: input.description ?? null,
         enabled_ratio: input.enabled_ratio,
+        hma_instance: input.hma_instance ?? 'DEFAULT',
         org_id: input.org_id,
       })
       .returningAll()

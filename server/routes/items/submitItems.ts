@@ -1,4 +1,5 @@
 import { type ItemIdentifier } from '@roostorg/coop-types';
+import _ from 'lodash';
 import { v1 as uuidv1 } from 'uuid';
 
 import {
@@ -27,7 +28,10 @@ import {
 } from '../../utils/errors.js';
 import { safeGet, withRetries } from '../../utils/misc.js';
 import { type RequestHandlerWithBodies } from '../../utils/route-helpers.js';
-import { addHashesToImageFields } from './hashImageFields.js';
+import {
+  addHashesToImageFields,
+  makeClipHasherForOrg,
+} from './hashImageFields.js';
 import { type SubmitItemsInput } from './ItemRoutes.js';
 
 /**
@@ -99,6 +103,18 @@ Dependencies): RequestHandlerWithBodies<SubmitItemsInput, undefined> {
       getItemTypeEventuallyConsistent,
     );
 
+    // Shared by every item in the request, so that CLIP hashing is serialized
+    // and stops after the first failure of the CLIP service.
+    // Listing the banks also checks each one against HMA, so do it once for
+    // the request rather than once per item.
+    const listBanks = _.once(async () => HMAHashBankService.listBanks(orgId));
+
+    const clipHasher = makeClipHasherForOrg({
+      orgId,
+      HMAHashBankService,
+      onOutcome: (outcome) => Meter.clipHashesCounter.add(1, { outcome }),
+    });
+
     const itemSubmissionsOrErrors = await Promise.all(
       items.map(async (message) => {
         const itemSubmission = await toItemSubmission(message);
@@ -109,6 +125,8 @@ Dependencies): RequestHandlerWithBodies<SubmitItemsInput, undefined> {
             data: itemSubmission.itemSubmission.data,
             orgId,
             HMAHashBankService,
+            clipHasher,
+            listBanks,
           });
         }
 

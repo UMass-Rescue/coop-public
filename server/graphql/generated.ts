@@ -836,6 +836,7 @@ export type GQLCreateHashBankInput = {
   readonly description?: InputMaybe<Scalars['String']['input']>;
   readonly enabled_ratio: Scalars['Float']['input'];
   readonly exchange?: InputMaybe<GQLExchangeConfigInput>;
+  readonly hma_instance?: InputMaybe<GQLHashBankHmaInstance>;
   readonly name: Scalars['String']['input'];
 };
 
@@ -1483,12 +1484,24 @@ export type GQLHashBank = {
   readonly description?: Maybe<Scalars['String']['output']>;
   readonly enabled_ratio: Scalars['Float']['output'];
   readonly exchange?: Maybe<GQLExchangeInfo>;
+  readonly hma_instance: GQLHashBankHmaInstance;
   readonly hma_name: Scalars['String']['output'];
   readonly id: Scalars['ID']['output'];
   readonly name: Scalars['String']['output'];
   readonly org_id: Scalars['String']['output'];
 };
 
+/**
+ * Which HMA deployment holds a bank. DEFAULT is the standard HMA (PDQ images,
+ * MD5 video); CLIP is the optional CLIP instance. Fixed when the bank is created.
+ */
+export const GQLHashBankHmaInstance = {
+  Clip: 'CLIP',
+  Default: 'DEFAULT',
+} as const;
+
+export type GQLHashBankHmaInstance =
+  (typeof GQLHashBankHmaInstance)[keyof typeof GQLHashBankHmaInstance];
 export type GQLIgnoreDecisionComponent =
   GQLManualReviewDecisionComponentBase & {
     readonly __typename?: 'IgnoreDecisionComponent';
@@ -2715,6 +2728,7 @@ export type GQLMutation = {
   /** @deprecated Field no longer supported */
   readonly updateExchangeCredentials: Scalars['Boolean']['output'];
   readonly updateHasAppealsEnabled: Scalars['Boolean']['output'];
+  readonly updateHasClipHashingEnabled: Scalars['Boolean']['output'];
   readonly updateHasReportingRulesEnabled: Scalars['Boolean']['output'];
   readonly updateHashBank: GQLMutateHashBankResponse;
   readonly updateHashBankExchangeCredentials: GQLExchangeCredentialStatus;
@@ -3022,6 +3036,10 @@ export type GQLMutationUpdateExchangeCredentialsArgs = {
 };
 
 export type GQLMutationUpdateHasAppealsEnabledArgs = {
+  enabled: Scalars['Boolean']['input'];
+};
+
+export type GQLMutationUpdateHasClipHashingEnabledArgs = {
   enabled: Scalars['Boolean']['input'];
 };
 
@@ -3413,6 +3431,8 @@ export type GQLOrg = {
   readonly apiKey: Scalars['String']['output'];
   readonly appealsRoutingRules: ReadonlyArray<GQLRoutingRule>;
   readonly banks?: Maybe<GQLMatchingBanks>;
+  /** Whether this deployment has the optional CLIP instance, so the setting can be turned on. */
+  readonly clipHashingAvailable: Scalars['Boolean']['output'];
   readonly contentTypes: ReadonlyArray<GQLContentType>;
   readonly defaultInterfacePreferences: GQLUserInterfacePreferences;
   readonly email: Scalars['String']['output'];
@@ -3423,6 +3443,8 @@ export type GQLOrg = {
    */
   readonly failedNcmecSubmissions: ReadonlyArray<GQLNcmecFailedSubmission>;
   readonly hasAppealsEnabled: Scalars['Boolean']['output'];
+  /** Whether this org hashes images with CLIP and can use CLIP hash banks. */
+  readonly hasClipHashingEnabled: Scalars['Boolean']['output'];
   readonly hasNCMECReportingEnabled: Scalars['Boolean']['output'];
   readonly hasPartialItemsEndpoint: Scalars['Boolean']['output'];
   readonly hasReportingRulesEnabled: Scalars['Boolean']['output'];
@@ -3667,6 +3689,11 @@ export type GQLQuery = {
   readonly getUserStrikeCountDistribution: ReadonlyArray<GQLUserStrikeBucket>;
   readonly hashBank?: Maybe<GQLHashBank>;
   readonly hashBankById?: Maybe<GQLHashBank>;
+  /**
+   * The HMA instances the signed-in org can create banks on. CLIP is listed only
+   * when the deployment has the CLIP instance and the org has turned CLIP on.
+   */
+  readonly hashBankHmaInstances: ReadonlyArray<GQLHashBankHmaInstance>;
   readonly hashBanks: ReadonlyArray<GQLHashBank>;
   readonly integrationConfig: GQLIntegrationConfigQueryResponse;
   readonly inviteUserToken: GQLInviteUserTokenResponse;
@@ -4664,6 +4691,7 @@ export const GQLSignalType = {
   Custom: 'CUSTOM',
   GeoContainedWithin: 'GEO_CONTAINED_WITHIN',
   GoogleContentSafetyApiImage: 'GOOGLE_CONTENT_SAFETY_API_IMAGE',
+  ImageClipMatch: 'IMAGE_CLIP_MATCH',
   ImageSimilarityDoesNotMatch: 'IMAGE_SIMILARITY_DOES_NOT_MATCH',
   ImageSimilarityMatch: 'IMAGE_SIMILARITY_MATCH',
   OpenAiGraphicViolenceImageModel: 'OPEN_AI_GRAPHIC_VIOLENCE_IMAGE_MODEL',
@@ -6169,6 +6197,7 @@ export type GQLResolversTypes = {
   HandleTimeGroupByColumns: GQLHandleTimeGroupByColumns;
   HandleTimeInput: GQLHandleTimeInput;
   HashBank: ResolverTypeWrapper<HashBank>;
+  HashBankHmaInstance: GQLHashBankHmaInstance;
   ID: ResolverTypeWrapper<Scalars['ID']['output']>;
   IgnoreDecisionComponent: ResolverTypeWrapper<GQLIgnoreDecisionComponent>;
   Int: ResolverTypeWrapper<Scalars['Int']['output']>;
@@ -9478,6 +9507,11 @@ export type GQLHashBankResolvers<
     ParentType,
     ContextType
   >;
+  hma_instance?: Resolver<
+    GQLResolversTypes['HashBankHmaInstance'],
+    ParentType,
+    ContextType
+  >;
   hma_name?: Resolver<GQLResolversTypes['String'], ParentType, ContextType>;
   id?: Resolver<GQLResolversTypes['ID'], ParentType, ContextType>;
   name?: Resolver<GQLResolversTypes['String'], ParentType, ContextType>;
@@ -11737,6 +11771,12 @@ export type GQLMutationResolvers<
     ContextType,
     RequireFields<GQLMutationUpdateHasAppealsEnabledArgs, 'enabled'>
   >;
+  updateHasClipHashingEnabled?: Resolver<
+    GQLResolversTypes['Boolean'],
+    ParentType,
+    ContextType,
+    RequireFields<GQLMutationUpdateHasClipHashingEnabledArgs, 'enabled'>
+  >;
   updateHasReportingRulesEnabled?: Resolver<
     GQLResolversTypes['Boolean'],
     ParentType,
@@ -12307,6 +12347,11 @@ export type GQLOrgResolvers<
     ParentType,
     ContextType
   >;
+  clipHashingAvailable?: Resolver<
+    GQLResolversTypes['Boolean'],
+    ParentType,
+    ContextType
+  >;
   contentTypes?: Resolver<
     ReadonlyArray<GQLResolversTypes['ContentType']>,
     ParentType,
@@ -12324,6 +12369,11 @@ export type GQLOrgResolvers<
     ContextType
   >;
   hasAppealsEnabled?: Resolver<
+    GQLResolversTypes['Boolean'],
+    ParentType,
+    ContextType
+  >;
+  hasClipHashingEnabled?: Resolver<
     GQLResolversTypes['Boolean'],
     ParentType,
     ContextType
@@ -12991,6 +13041,11 @@ export type GQLQueryResolvers<
     ParentType,
     ContextType,
     RequireFields<GQLQueryHashBankByIdArgs, 'id'>
+  >;
+  hashBankHmaInstances?: Resolver<
+    ReadonlyArray<GQLResolversTypes['HashBankHmaInstance']>,
+    ParentType,
+    ContextType
   >;
   hashBanks?: Resolver<
     ReadonlyArray<GQLResolversTypes['HashBank']>,

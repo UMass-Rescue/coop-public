@@ -1,5 +1,11 @@
 import { type Generated, type GeneratedAlways } from 'kysely';
 
+/**
+ * Which HMA deployment holds a bank: `DEFAULT` (stock HMA: PDQ images, MD5
+ * video) or `CLIP` (the optional CLIP instance, see CLIP_HMA_SERVICE_URL).
+ */
+export type HmaInstance = 'DEFAULT' | 'CLIP';
+
 export type HmaServicePg = {
   'public.hash_banks': {
     id: Generated<number>;
@@ -7,6 +13,7 @@ export type HmaServicePg = {
     hma_name: string;
     description: string | null;
     enabled_ratio: number;
+    hma_instance: Generated<HmaInstance>;
     org_id: string;
     created_at: GeneratedAlways<Date>;
     updated_at: GeneratedAlways<Date>;
@@ -20,6 +27,7 @@ export interface HashBank {
   hma_name: string;
   description: string | null;
   enabled_ratio: number;
+  hma_instance: HmaInstance;
   org_id: string;
   created_at: Date;
   updated_at: Date;
@@ -31,6 +39,7 @@ export interface CreateHashBankInput {
   hma_name: string;
   description?: string | null;
   enabled_ratio: number;
+  hma_instance?: HmaInstance;
   org_id: string;
 }
 

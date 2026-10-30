@@ -1,6 +1,8 @@
 import { TooltipProvider } from '@/coop-ui/Tooltip';
 import {
   GQLDeploymentSettingsDocument,
+  GQLImageMatchingAvailabilityDocument,
+  GQLImageMatchingSettingsDocument,
   GQLOrgDefaultSafetySettingsDocument,
   GQLOrgSettingsDocument,
   GQLSetOrgDefaultSafetySettingsDocument,
@@ -58,6 +60,37 @@ function renderWithProviders(mocks: MockedResponse[], tab = 'organization') {
     </HelmetProvider>,
   );
 }
+
+function availabilityMock(
+  clipHashingAvailable: boolean,
+  permissions: string[] = ['MANAGE_ORG'],
+): MockedResponse {
+  return {
+    request: { query: GQLImageMatchingAvailabilityDocument },
+    maxUsageCount: Infinity,
+    result: {
+      data: {
+        me: { __typename: 'User', id: 'user-1', permissions },
+        myOrg: { __typename: 'Org', id: 'org-1', clipHashingAvailable },
+      },
+    },
+  };
+}
+
+const imageMatchingSettingsMock: MockedResponse = {
+  request: { query: GQLImageMatchingSettingsDocument },
+  maxUsageCount: Infinity,
+  result: {
+    data: {
+      myOrg: {
+        __typename: 'Org',
+        id: 'org-1',
+        hasClipHashingEnabled: false,
+        clipHashingAvailable: true,
+      },
+    },
+  },
+};
 
 const orgSettingsMock: MockedResponse = {
   request: { query: GQLOrgSettingsDocument },
@@ -157,6 +190,10 @@ async function waitForOrgTabLoaded() {
   await waitFor(() => {
     expect(screen.getByDisplayValue('Test Org')).toBeInTheDocument();
   });
+}
+
+function tabNamed(name: string) {
+  return screen.queryByRole('tab', { name });
 }
 
 describe('SettingsPage', () => {
@@ -816,6 +853,66 @@ describe('SettingsPage', () => {
         });
         unmount();
       }
+    });
+  });
+
+  describe('Image Matching tab', () => {
+    test('appears for an org admin when the deployment has CLIP', async () => {
+      renderWithProviders([availabilityMock(true), orgSettingsMock]);
+
+      expect(
+        await screen.findByRole('tab', { name: 'Image Matching' }),
+      ).toBeInTheDocument();
+    });
+
+    test('is hidden when the deployment has no CLIP', async () => {
+      renderWithProviders([availabilityMock(false), orgSettingsMock]);
+
+      await screen.findByRole('tab', { name: 'Organization' });
+      await waitFor(() => {
+        expect(tabNamed('Image Matching')).not.toBeInTheDocument();
+      });
+    });
+
+    test('is hidden from users who cannot manage the org', async () => {
+      renderWithProviders([
+        availabilityMock(true, ['VIEW_MRT']),
+        orgSettingsMock,
+      ]);
+
+      await screen.findByRole('tab', { name: 'Organization' });
+      await waitFor(() => {
+        expect(tabNamed('Image Matching')).not.toBeInTheDocument();
+      });
+    });
+
+    test('opens from a direct link when available', async () => {
+      renderWithProviders(
+        [availabilityMock(true), imageMatchingSettingsMock],
+        'image-matching',
+      );
+
+      expect(
+        await screen.findByText('Semantic image matching (CLIP)'),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('tab', { name: 'Image Matching', selected: true }),
+      ).toBeInTheDocument();
+    });
+
+    test('falls back to Organization from a direct link when unavailable', async () => {
+      renderWithProviders(
+        [availabilityMock(false), orgSettingsMock],
+        'image-matching',
+      );
+
+      expect(
+        await screen.findByRole('tab', {
+          name: 'Organization',
+          selected: true,
+        }),
+      ).toBeInTheDocument();
+      expect(tabNamed('Image Matching')).not.toBeInTheDocument();
     });
   });
 });

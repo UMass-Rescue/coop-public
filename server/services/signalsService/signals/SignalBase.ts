@@ -49,6 +49,11 @@ export interface ImageValue {
   hashes?: {
     pdq?: string;
   };
+  // CLIP embeddings, kept apart from `hashes` because everything in `hashes`
+  // is treated as an exact-match file hash and forwarded to NCMEC reports.
+  embeddings?: {
+    clip_float?: string;
+  };
   // Matched hash banks populated during rule execution
   matchedBanks?: string[];
 }
@@ -240,6 +245,15 @@ export default abstract class SignalBase<
       Type
     >,
   ): Promise<SignalResult<OutputType> | SignalErrorResult>;
+
+  /**
+   * Whether the signal is listed for an org at all. Most signals are, whether
+   * or not they are enabled. A signal that cannot work on this deployment can
+   * return false so that orgs are not shown something they cannot use.
+   */
+  async isVisibleToOrg(_orgId: string): Promise<boolean> {
+    return true;
+  }
 
   /**
    * Returns a DisabledInfo object that tells the client whether

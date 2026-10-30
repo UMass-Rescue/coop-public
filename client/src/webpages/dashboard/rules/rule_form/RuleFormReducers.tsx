@@ -15,6 +15,7 @@ import {
 import { DAY } from '../../../../utils/time';
 import { CoopInput } from '../../types/enums';
 import { ModalInfo } from '../../types/ModalInfo';
+import { matchingValuesForNewSignal } from '../imageBankInstance';
 import {
   ConditionInput,
   ConditionLocation,
@@ -868,6 +869,7 @@ export function updateSignal(
     location,
     signal,
     (condition, value) => {
+      condition.matchingValues = matchingValuesForNewSignal(condition, value);
       condition.signal = value;
       condition.threshold = undefined;
       return condition;
