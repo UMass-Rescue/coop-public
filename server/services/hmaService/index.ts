@@ -1259,9 +1259,16 @@ export class HmaService {
     return response.body as unknown as LookupResponse;
   }
 
+  /**
+   * Adds an image to a bank in HMA. Adding the same content twice stores it
+   * twice, and HMA has no way to list a bank, so callers cannot check first.
+   * @param options.instance The HMA instance that holds the bank. CLIP banks
+   * live on the CLIP instance.
+   */
   async addContentToBank(
     bankName: string,
     options: {
+      instance?: HmaInstance;
       file?: File | Blob;
       contentType?: ContentType;
       url?: string;
@@ -1272,7 +1279,7 @@ export class HmaService {
       };
     },
   ): Promise<BankContentResponse> {
-    const { file, contentType, url, metadata } = options;
+    const { instance = 'DEFAULT', file, contentType, url, metadata } = options;
 
     if (!url && (!file || !contentType)) {
       throw new Error(
@@ -1295,7 +1302,8 @@ export class HmaService {
       }
 
       response = await this.fetchHTTP({
-        url: `${this.hmaServiceUrl}/c/bank/${bankName}/content?${params.toString()}`,
+        url: `${this.urlFor(instance)}/c/bank/${bankName}/content?${params.toString()}`,
+        timeoutMs: this.timeoutFor(instance),
         method: 'post',
         handleResponseBody: 'as-json',
       });
@@ -1318,7 +1326,8 @@ export class HmaService {
       }
 
       response = await this.fetchHTTP({
-        url: `${this.hmaServiceUrl}/c/bank/${bankName}/content`,
+        url: `${this.urlFor(instance)}/c/bank/${bankName}/content`,
+        timeoutMs: this.timeoutFor(instance),
         method: 'post',
         // Don't set Content-Type explicitly: undici needs to add the multipart
         // boundary parameter itself when serializing the FormData.

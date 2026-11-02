@@ -159,6 +159,20 @@ To run the same checks automatically, use the smoke test. It prints each command
 hma/clip/smoke-test.sh
 ```
 
+## Add images to a CLIP bank
+
+Create the bank under Settings, Banks (choosing the CLIP instance), then add images from a directory with the seed script. From the `server` directory:
+
+```bash
+pnpm run seed-clip-bank --org <orgId> --bank "<bank name>" --dir <directory of images> [--dry-run]
+```
+
+It reads the `.env` in `server/`, adds every `.jpg`, `.jpeg`, `.png`, `.gif` and `.webp` file directly inside the directory (subfolders and symbolic links are skipped) to the bank, and prints one line per image. `--dry-run` lists the images without adding them. The script stops with a message if the bank does not exist, is not a CLIP bank, or CLIP is not turned on for the organization, and exits nonzero if any image fails.
+
+HMA cannot list a bank's contents, and adding the same image twice stores it twice (observed against the CLIP instance, even with the same content id), so the script cannot tell which images are already there: running it twice on the same directory adds the images twice. This does not change matching, but it wastes space. To start over, delete the bank and create it again.
+
+If `pnpm run` cannot start the script, build the server (`pnpm start` does this) and run the compiled file instead: `node --env-file-if-exists=.env transpiled/bin/seed-clip-bank.js --org ... --bank ... --dir ...`.
+
 ## Clean up
 
 Stop the CLIP instance and its database, naming the services so the rest of the stack keeps running:

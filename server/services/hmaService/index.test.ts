@@ -1364,6 +1364,77 @@ describe('HmaService', () => {
       });
     });
 
+    describe('addContentToBank', () => {
+      const BANK = 'COOP_ORG1_BANK';
+      const content = {
+        file: new Blob(['image bytes']),
+        contentType: 'photo' as const,
+      };
+
+      it('adds to the CLIP instance, with its timeout, for a CLIP bank', async () => {
+        const fetchHTTP = routeFetch({
+          'POST /c/bank/COOP_ORG1_BANK/content': ok({ id: 7 }),
+        });
+
+        await makeClipService(fetchHTTP).addContentToBank(BANK, {
+          ...content,
+          instance: 'CLIP',
+        });
+
+        expect(fetchHTTP).toHaveBeenCalledWith(
+          expect.objectContaining({
+            url: `${CLIP_URL}/c/bank/${BANK}/content`,
+            timeoutMs: 10_000,
+          }),
+        );
+      });
+
+      it('adds a url to the CLIP instance for a CLIP bank', async () => {
+        const fetchHTTP = routeFetch({
+          'POST /c/bank/COOP_ORG1_BANK/content': ok({ id: 7 }),
+        });
+
+        await makeClipService(fetchHTTP).addContentToBank(BANK, {
+          url: 'https://x.test/a.png',
+          instance: 'CLIP',
+        });
+
+        expect(fetchHTTP).toHaveBeenCalledWith(
+          expect.objectContaining({
+            url: expect.stringContaining(`${CLIP_URL}/c/bank/${BANK}/content?`),
+            timeoutMs: 10_000,
+          }),
+        );
+      });
+
+      it('keeps using the standard instance, without a timeout, by default', async () => {
+        const fetchHTTP = routeFetch({
+          'POST /c/bank/COOP_ORG1_BANK/content': ok({ id: 7 }),
+        });
+
+        await makeClipService(fetchHTTP).addContentToBank(BANK, content);
+
+        const call = fetchHTTP.mock.calls[0][0] as {
+          url: string;
+          timeoutMs?: number;
+        };
+        expect(call.url).not.toContain(CLIP_URL);
+        expect(call.url).toContain(`/c/bank/${BANK}/content`);
+        expect(call.timeoutMs).toBeUndefined();
+      });
+
+      it('refuses a CLIP bank when CLIP is not deployed', async () => {
+        const fetchHTTP = vi.fn();
+        await expect(
+          makeClipService(fetchHTTP, null).addContentToBank(BANK, {
+            ...content,
+            instance: 'CLIP',
+          }),
+        ).rejects.toThrow('CLIP_HMA_SERVICE_URL');
+        expect(fetchHTTP).not.toHaveBeenCalled();
+      });
+    });
+
     describe('timeouts', () => {
       const timeoutOf = (fetchHTTP: Mock, pathPart: string) =>
         (
