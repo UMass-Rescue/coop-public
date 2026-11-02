@@ -3,7 +3,7 @@
 /**
  * Adds the images in a directory to a CLIP hash bank.
  *
- * The bank must already exist (create it under Settings, Banks, choosing the
+ * The bank must already exist (create it under Automated Enforcement, Matching Banks, choosing the
  * CLIP instance), and CLIP must be turned on for the org. Running this twice
  * on the same directory adds the images twice: HMA cannot list a bank, so
  * there is nothing to check against. Use --dry-run to see what would be added.

@@ -5,7 +5,7 @@
 CLIP is a separate deployment. The default HMA instance is unchanged and needs no GPU. If you don't deploy the CLIP instance, nothing changes for you.
 
 > [!NOTE]
-> This page covers deploying the CLIP HMA instance, turning it on for an organization, and what Coop does with it when images are submitted. Matching images against CLIP banks in rules is not available yet.
+> This page covers deploying the CLIP HMA instance, turning it on for an organization, and what Coop does with it when images are submitted.
 
 ## System requirements
 
@@ -153,7 +153,7 @@ The first hash request downloads the model weights, so it can take a minute or t
 
 The HMA web UI at `http://localhost:9877/ui/` can also add images to a bank.
 
-To run the same checks automatically, use the smoke test. It prints each command, exits nonzero on failure, and deletes its temporary bank:
+To run the same kind of check automatically, use the smoke test. It adds one fixture image to a temporary bank and checks that three edited copies of it match, with scores between 0.90 and 1.00, and that two different images do not. It needs no internet access. It prints each command and a results table, exits nonzero on failure, and deletes its temporary bank. HMA indexes a new bank on a timer, so it waits about 2 to 3 minutes before the lookups. A score is 1 minus the cosine distance between the two embeddings.
 
 ```bash
 hma/clip/smoke-test.sh
@@ -161,7 +161,7 @@ hma/clip/smoke-test.sh
 
 ## Add images to a CLIP bank
 
-Create the bank under Settings, Banks (choosing the CLIP instance), then add images from a directory with the seed script. From the `server` directory:
+Create the bank under Automated Enforcement, Matching Banks (choosing the CLIP instance), then add images from a directory with the seed script. From the `server` directory:
 
 ```bash
 pnpm run seed-clip-bank --org <orgId> --bank "<bank name>" --dir <directory of images> [--dry-run]
@@ -173,27 +173,9 @@ HMA cannot list a bank's contents, and adding the same image twice stores it twi
 
 If `pnpm run` cannot start the script, build the server (`pnpm start` does this) and run the compiled file instead: `node --env-file-if-exists=.env transpiled/bin/seed-clip-bank.js --org ... --bank ... --dir ...`.
 
-## Run the Coop smoke test
+## Test it through the Coop UI
 
-`hma/clip/smoke-test-coop.sh` checks the whole chain. Part 1 seeds a bank from `hma/clip/fixtures/bank` and checks on the CLIP instance that a resized copy of the image matches and an unrelated image does not. Part 2 submits both images through the Coop API and checks that a rule fires for the resized copy only.
-
-Part 2 needs a one-time setup in Coop, with CLIP turned on for the organization:
-
-1. Create a CLIP bank (for example "CLIP smoke test").
-2. Use or create an item type with an image field, and note its id and the field name.
-3. Create a custom action whose callback URL is `http://localhost:8766/` (the script listens there while it runs). Coop refuses `localhost` callback URLs unless the server runs with `ALLOW_USER_INPUT_LOCALHOST_URIS=true` (set in `server/.env.example`, but `false` in `.env.docker`). If Coop itself runs in a container, `localhost` is the container, so use a host name that reaches this machine, such as `host.docker.internal`.
-4. Create a proactive rule on that item type with the condition "Image similarity (CLIP) is at least 0.95" against the bank, and the action above.
-5. Make sure the Coop server is running with `CLIP_HMA_SERVICE_URL` set, built from this branch, and that `server/transpiled` is current.
-
-Then run it from the repository root:
-
-```bash
-API_KEY=<key> ORG_ID=<orgId> BANK_NAME="CLIP smoke test" \
-ITEM_TYPE_ID=<item type id> IMAGE_FIELD=<field name> \
-hma/clip/smoke-test-coop.sh
-```
-
-The script serves the fixture images from this machine (the CLIP container reaches them at `host.docker.internal`; set `IMAGE_HOST` if that name does not resolve), prints each command it runs, and ends with `PASS: CLIP matching works through Coop`. On exit it stops what it started, removes the image it added to the bank, and moves its temporary files to the Trash. The rule, action and bank from the setup stay for the next run, as do the two test items it submitted to Coop (each run uses new item ids). The script also opens two ports on all network interfaces while it runs (8765 and 8766 by default), so run it on a trusted network. The fixture images are drawn by `hma/clip/fixtures/generate.py`, so they carry no third-party license.
+`hma/clip/smoke-test.sh` (above) checks the CLIP instance from the terminal. To try the whole feature as a user would, from turning CLIP on to seeing a matching image arrive in the review queue, follow the [CLIP testing guide](hma-clip-ui-testing.md). It uses the fixture images in `hma/clip/fixtures/`.
 
 ## Clean up
 
@@ -219,3 +201,4 @@ The image in `hma/clip/` builds HMA from a pinned [ThreatExchange](https://githu
 ## See also
 
 - [Hasher-Matcher-Actioner (HMA)](hma.md)
+- [Testing CLIP through the Coop UI](hma-clip-ui-testing.md)

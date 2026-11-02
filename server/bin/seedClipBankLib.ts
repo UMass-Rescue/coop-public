@@ -59,7 +59,7 @@ export async function seedClipBank(args: {
   if (!bank) {
     if (!hmaService.isClipEnabled()) {
       throw new Error(
-        'CLIP is not available: CLIP_HMA_SERVICE_URL is not set for this deployment.',
+        'CLIP is not available: CLIP_HMA_SERVICE_URL is not set. Set it in server/.env (or the environment this script runs in), for example http://localhost:9877.',
       );
     }
     throw new Error(
