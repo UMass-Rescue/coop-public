@@ -1,5 +1,10 @@
+-- Safe to run again: an earlier name of this migration may already have been
+-- applied to a database, so every statement checks first.
 ALTER TABLE hash_banks
-    ADD COLUMN hma_instance VARCHAR(16) NOT NULL DEFAULT 'DEFAULT',
+    ADD COLUMN IF NOT EXISTS hma_instance VARCHAR(16) NOT NULL DEFAULT 'DEFAULT';
+
+ALTER TABLE hash_banks
+    DROP CONSTRAINT IF EXISTS hash_banks_hma_instance_check,
     ADD CONSTRAINT hash_banks_hma_instance_check
     CHECK (hma_instance IN ('DEFAULT', 'CLIP'));
 
