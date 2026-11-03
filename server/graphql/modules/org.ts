@@ -8,6 +8,7 @@ import {
   validateActionParameterValues,
 } from '../../services/moderationConfigService/index.js';
 import { filterDecisionsToFailedSubmissions } from '../../services/ncmecService/index.js';
+import { SignalType } from '../../services/signalsService/index.js';
 import { UserPermission } from '../../services/userManagementService/index.js';
 import { __throw } from '../../utils/misc.js';
 import { isValidUrl } from '../../utils/url.js';
@@ -27,6 +28,7 @@ import {
   userInputError,
 } from '../utils/errors.js';
 import { gqlSuccessResult } from '../utils/gqlResult.js';
+import { listBanksForGraphql } from './hashBanks/resolvers.js';
 
 const typeDefs = /* GraphQL */ `
   type Org {
@@ -71,6 +73,11 @@ const typeDefs = /* GraphQL */ `
     hasClipHashingEnabled: Boolean!
     "Whether this deployment has the optional CLIP instance, so the setting can be turned on."
     clipHashingAvailable: Boolean!
+    """
+    The rules that use CLIP, so the settings page can say what turning CLIP off
+    will change. Requires MANAGE_ORG.
+    """
+    clipRuleImpact: ClipRuleImpact!
     ncmecReports: [NCMECReport!]!
     """
     NCMEC decisions that did not produce a successful CyberTip report. Returned
@@ -103,6 +110,27 @@ const typeDefs = /* GraphQL */ `
     appealsCallbackUrl: String
     appealsCallbackHeaders: JSONObject
     appealsCallbackBody: JSONObject
+  }
+
+  enum ClipRuleKind {
+    PROACTIVE
+    REPORTING
+    ROUTING
+  }
+
+  type ClipRule {
+    id: ID!
+    name: String!
+    kind: ClipRuleKind!
+  }
+
+  type ClipRuleImpact {
+    "Live or Background rules. Turning CLIP off moves them to Draft."
+    activeRules: [ClipRule!]!
+    "Routing rules have no Draft state: while CLIP is off they stop matching."
+    routingRules: [ClipRule!]!
+    "Draft rules that use CLIP. They stay in Draft until turned on by hand."
+    draftRules: [ClipRule!]!
   }
 
   type AppealSettings {
@@ -521,6 +549,63 @@ const Org: GQLOrgResolvers = {
     }
     return context.services.HMAHashBankService.isClipEnabled();
   },
+  async clipRuleImpact(org, _, context) {
+    const user = context.getUser();
+    if (!user || user.orgId !== org.id) {
+      throw unauthenticatedError('User required.');
+    }
+    if (!user.getPermissions().includes(UserPermission.MANAGE_ORG)) {
+      throw forbiddenError('User does not have permission to view this.');
+    }
+    const {
+      ModerationConfigService,
+      ReportingService,
+      ManualReviewToolService,
+    } = context.services;
+    const signalType = SignalType.IMAGE_CLIP_MATCH;
+    const [proactive, reporting, routing, draftProactive, draftReporting] =
+      await Promise.all([
+        ModerationConfigService.ruleSignals().getRulesUsingSignal({
+          orgId: org.id,
+          signalType,
+          statuses: ['LIVE', 'BACKGROUND'],
+        }),
+        ReportingService.getReportingRulesUsingSignal({
+          orgId: org.id,
+          signalType,
+          statuses: ['LIVE', 'BACKGROUND'],
+        }),
+        ManualReviewToolService.getRoutingRulesUsingSignal({
+          orgId: org.id,
+          signalType,
+        }),
+        ModerationConfigService.ruleSignals().getRulesUsingSignal({
+          orgId: org.id,
+          signalType,
+          statuses: ['DRAFT'],
+        }),
+        ReportingService.getReportingRulesUsingSignal({
+          orgId: org.id,
+          signalType,
+          statuses: ['DRAFT'],
+        }),
+      ]);
+    const asRules = (
+      rules: readonly { id: string; name: string }[],
+      kind: 'PROACTIVE' | 'REPORTING' | 'ROUTING',
+    ) => rules.map(({ id, name }) => ({ id, name, kind }) as const);
+    return {
+      activeRules: [
+        ...asRules(proactive, 'PROACTIVE'),
+        ...asRules(reporting, 'REPORTING'),
+      ],
+      routingRules: asRules(routing, 'ROUTING'),
+      draftRules: [
+        ...asRules(draftProactive, 'PROACTIVE'),
+        ...asRules(draftReporting, 'REPORTING'),
+      ],
+    };
+  },
   async userStrikeTTL(org, _, context) {
     const user = context.getUser();
     if (!user || user.orgId !== org.id) {
@@ -908,7 +993,7 @@ const MatchingBanks: GQLMatchingBanksResolvers = {
     if (!user || user.orgId !== org.id) {
       throw unauthenticatedError('User required.');
     }
-    return context.services.HMAHashBankService.listBanks(org.id);
+    return listBanksForGraphql(context, org.id);
   },
 };
 
@@ -1039,6 +1124,22 @@ const Mutation: GQLMutationResolvers = {
       throw userInputError(
         'CLIP is not available: this deployment has no CLIP HMA instance.',
       );
+    }
+    if (!enabled) {
+      // A rule that uses CLIP cannot run while CLIP is off, so take the active
+      // ones out of service first. Both steps are safe to repeat, and doing the
+      // rules first means a failure leaves CLIP on rather than rules erroring.
+      const { ModerationConfigService, ReportingService } = context.services;
+      await ModerationConfigService.ruleSignals().moveActiveRulesUsingSignalToDraft(
+        {
+          orgId: user.orgId,
+          signalType: SignalType.IMAGE_CLIP_MATCH,
+        },
+      );
+      await ReportingService.moveActiveReportingRulesUsingSignalToDraft({
+        orgId: user.orgId,
+        signalType: SignalType.IMAGE_CLIP_MATCH,
+      });
     }
     await context.services.OrgSettingsService.updateHasClipHashingEnabled({
       orgId: user.orgId,

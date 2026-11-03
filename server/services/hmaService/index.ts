@@ -825,12 +825,27 @@ export class HmaService {
     return bank;
   }
 
+  /** The banks the org can use now. CLIP banks are left out while CLIP is off. */
   async listBanks(orgId: string): Promise<HashBank[]> {
+    const banks = await this.listBanksWithAvailability(orgId);
+    return banks.filter((it) => it.available).map((it) => it.bank);
+  }
+
+  /**
+   * All the org's banks, each marked with whether it can be used now. A CLIP
+   * bank is unavailable while CLIP is off for the org (or cannot be checked).
+   * Unavailable banks are not looked up in HMA, since their instance may not
+   * be reachable, and are never deleted.
+   */
+  async listBanksWithAvailability(
+    orgId: string,
+  ): Promise<{ bank: HashBank; available: boolean }[]> {
     try {
       // Get all local banks for org
       const allBanks = await this.hashBankService.findAllByOrgId(orgId);
       // One settings read per call, and none for orgs without CLIP banks. If
-      // the read fails, hide only the CLIP banks rather than losing every bank.
+      // the read fails, mark only the CLIP banks unavailable rather than
+      // losing every bank.
       const clipAvailable = allBanks.some(
         (bank) => bank.hma_instance === 'CLIP',
       )
@@ -842,6 +857,9 @@ export class HmaService {
       const banks = allBanks.filter(
         (bank) => bank.hma_instance !== 'CLIP' || clipAvailable,
       );
+      const unavailable = allBanks
+        .filter((bank) => !banks.includes(bank))
+        .map((bank) => ({ bank, available: false }));
 
       // Filter out banks that don't exist in HMA service
       const validBanks = await Promise.all(
@@ -881,7 +899,12 @@ export class HmaService {
         }),
       );
 
-      return validBanks.filter((bank): bank is HashBank => bank !== null);
+      return [
+        ...validBanks
+          .filter((bank): bank is HashBank => bank !== null)
+          .map((bank) => ({ bank, available: true })),
+        ...unavailable,
+      ];
     } catch (error) {
       return [];
     }

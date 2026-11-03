@@ -30,6 +30,8 @@ export const typeDefs = /* GraphQL */ `
     hma_instance: HashBankHmaInstance!
     org_id: String!
     exchange: ExchangeInfo
+    "False while the bank cannot be used, for example a CLIP bank while CLIP is off for the org."
+    isAvailable: Boolean!
   }
 
   type ExchangeFieldDescriptor {

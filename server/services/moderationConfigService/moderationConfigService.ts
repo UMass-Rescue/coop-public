@@ -18,6 +18,7 @@ import PolicyOperations, {
   type PolicyErrorType,
 } from './modules/PolicyOperations.js';
 import RuleReadOperations from './modules/RuleReadOperations.js';
+import { RuleSignalOperations } from './modules/RuleSignalOperations.js';
 import UserStrikeOperations, {
   type UserStrikeThresholdErrorType,
 } from './modules/UserStrikeOperations.js';
@@ -97,6 +98,7 @@ export class ModerationConfigService implements ReturnsModerationConfigTypes {
   private readonly userStrikeOps: UserStrikeOperations;
   private readonly matchingBankOps: MatchingBankOperations;
   private readonly ruleReadOps: RuleReadOperations;
+  private readonly ruleSignalOps: RuleSignalOperations;
 
   constructor(
     pgQuery: Kysely<ModerationConfigServicePg>,
@@ -116,6 +118,7 @@ export class ModerationConfigService implements ReturnsModerationConfigTypes {
     this.userStrikeOps = new UserStrikeOperations(pgQuery, pgQueryReplica);
     this.matchingBankOps = new MatchingBankOperations(pgQuery, pgQueryReplica);
     this.ruleReadOps = new RuleReadOperations(pgQuery, pgQueryReplica);
+    this.ruleSignalOps = new RuleSignalOperations(pgQuery);
   }
 
   async getItemTypes(opts: {
@@ -305,6 +308,11 @@ export class ModerationConfigService implements ReturnsModerationConfigTypes {
       ruleIds,
       readFromReplica: true,
     });
+  }
+
+  /** Finds, and moves to Draft, the rules that use a given signal. */
+  ruleSignals() {
+    return this.ruleSignalOps;
   }
 
   async getEnabledRulesForItemType(itemTypeId: string) {

@@ -18,6 +18,7 @@ import { type ConsumerDirectives } from '../../../lib/cache/index.js';
 import { type RuleExecutionResult } from '../../../rule_engine/RuleEvaluator.js';
 import { cached } from '../../../utils/caching.js';
 import { moveArrayElement } from '../../../utils/collections.js';
+import { conditionSetUsesSignal } from '../../../utils/conditionSetSignal.js';
 import { getSourceType } from '../../../utils/correlationIds.js';
 import {
   CoopError,
@@ -131,6 +132,20 @@ export default class JobRouting {
     const { orgId, directives } = opts;
 
     return this.routingRulesCache(orgId, directives);
+  }
+
+  /** The org's routing rules that use a signal, by name. */
+  async getRoutingRulesUsingSignal(opts: {
+    orgId: string;
+    signalType: string;
+  }) {
+    return this.pgQuery
+      .selectFrom('manual_review_tool.routing_rules')
+      .select(['id', 'name'])
+      .where('org_id', '=', opts.orgId)
+      .where(conditionSetUsesSignal('condition_set', opts.signalType))
+      .orderBy('name')
+      .execute();
   }
 
   async createRoutingRule(input: CreateRoutingRuleInput) {

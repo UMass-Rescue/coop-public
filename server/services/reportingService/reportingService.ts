@@ -30,8 +30,10 @@ import {
 } from './reportingRuleHistoryHelpers.js';
 import ReportingRules, {
   type CreateReportingRuleInput,
+  type ReportingRuleStatus,
   type UpdateReportingRuleInput,
 } from './ReportingRules.js';
+import { ReportingRuleSignalOperations } from './ReportingRuleSignalOperations.js';
 
 export type ReporterKind = 'rule' | 'user';
 export type Reporter =
@@ -85,6 +87,7 @@ function makeReportingService(
   tracer: Dependencies['Tracer'],
 ) {
   const reportingRules = new ReportingRules(pgQuery);
+  const reportingRuleSignals = new ReportingRuleSignalOperations(pgQuery);
   const reportingRuleEngine = new ReportingRuleEngine(
     ruleEvaluator,
     reportingRuleExecutionLogger,
@@ -350,6 +353,21 @@ function makeReportingService(
       directives?: ConsumerDirectives;
     }) {
       return reportingRules.getReportingRules(opts);
+    },
+
+    async getReportingRulesUsingSignal(opts: {
+      orgId: string;
+      signalType: string;
+      statuses: readonly ReportingRuleStatus[];
+    }) {
+      return reportingRuleSignals.getRulesUsingSignal(opts);
+    },
+
+    async moveActiveReportingRulesUsingSignalToDraft(opts: {
+      orgId: string;
+      signalType: string;
+    }) {
+      return reportingRuleSignals.moveActiveRulesUsingSignalToDraft(opts);
     },
 
     async createReportingRule(opts: CreateReportingRuleInput) {

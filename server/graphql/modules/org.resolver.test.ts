@@ -418,6 +418,14 @@ describe('Org resolvers', () => {
             hasClipHashingEnabled,
           },
           HMAHashBankService: { isClipEnabled: () => opts.clipDeployed },
+          ModerationConfigService: {
+            ruleSignals: () => ({
+              moveActiveRulesUsingSignalToDraft: vi.fn(async () => []),
+            }),
+          },
+          ReportingService: {
+            moveActiveReportingRulesUsingSignalToDraft: vi.fn(async () => []),
+          },
         },
       };
       return { ctx, updateHasClipHashingEnabled, hasClipHashingEnabled };
@@ -510,6 +518,185 @@ describe('Org resolvers', () => {
       ).rejects.toThrow('User required.');
       await expect(
         Org.clipHashingAvailable({ id: 'org-1' }, {}, other),
+      ).rejects.toThrow('User required.');
+    });
+  });
+});
+
+describe('turning CLIP off', () => {
+  const CLIP = 'IMAGE_CLIP_MATCH';
+
+  function makeCtx(opts: { permissions?: readonly UserPermission[] } = {}) {
+    const updateHasClipHashingEnabled = vi.fn(async () => undefined);
+    const moveProactive = vi.fn(async () => []);
+    const moveReporting = vi.fn(async () => []);
+    const getRulesUsingSignal = vi.fn(
+      async (args: { statuses: readonly string[] }) =>
+        args.statuses.includes('DRAFT')
+          ? [{ id: 'p-draft', name: 'Drafted proactive' }]
+          : [{ id: 'p-live', name: 'Live proactive' }],
+    );
+    const getReportingRulesUsingSignal = vi.fn(
+      async (args: { statuses: readonly string[] }) =>
+        args.statuses.includes('DRAFT')
+          ? [{ id: 'r-draft', name: 'Drafted reporting' }]
+          : [{ id: 'r-live', name: 'Live reporting' }],
+    );
+    const getRoutingRulesUsingSignal = vi.fn(async () => [
+      { id: 'route-1', name: 'Route images' },
+    ]);
+    const ctx = {
+      getUser: () => ({
+        id: 'user-1',
+        orgId: 'org-1',
+        getPermissions: () => opts.permissions ?? [UserPermission.MANAGE_ORG],
+      }),
+      services: {
+        OrgSettingsService: { updateHasClipHashingEnabled },
+        HMAHashBankService: { isClipEnabled: () => true },
+        ModerationConfigService: {
+          ruleSignals: () => ({
+            moveActiveRulesUsingSignalToDraft: moveProactive,
+            getRulesUsingSignal,
+          }),
+        },
+        ReportingService: {
+          moveActiveReportingRulesUsingSignalToDraft: moveReporting,
+          getReportingRulesUsingSignal,
+        },
+        ManualReviewToolService: { getRoutingRulesUsingSignal },
+      },
+    };
+    return {
+      ctx,
+      updateHasClipHashingEnabled,
+      moveProactive,
+      moveReporting,
+      getRulesUsingSignal,
+      getReportingRulesUsingSignal,
+      getRoutingRulesUsingSignal,
+    };
+  }
+
+  const update = (
+    resolvers.Mutation as Record<
+      'updateHasClipHashingEnabled',
+      (
+        parent: unknown,
+        args: { enabled: boolean },
+        ctx: unknown,
+      ) => Promise<boolean>
+    >
+  ).updateHasClipHashingEnabled;
+
+  it('moves the org active rules that use CLIP to Draft before switching the setting off', async () => {
+    const { ctx, moveProactive, moveReporting, updateHasClipHashingEnabled } =
+      makeCtx();
+
+    await expect(update({}, { enabled: false }, ctx)).resolves.toBe(true);
+
+    expect(moveProactive).toHaveBeenCalledWith({
+      orgId: 'org-1',
+      signalType: CLIP,
+    });
+    expect(moveReporting).toHaveBeenCalledWith({
+      orgId: 'org-1',
+      signalType: CLIP,
+    });
+    expect(updateHasClipHashingEnabled).toHaveBeenCalledWith({
+      orgId: 'org-1',
+      enabled: false,
+    });
+    const setting = updateHasClipHashingEnabled.mock.invocationCallOrder[0];
+    expect(moveProactive.mock.invocationCallOrder[0]).toBeLessThan(setting);
+    expect(moveReporting.mock.invocationCallOrder[0]).toBeLessThan(setting);
+  });
+
+  it('leaves CLIP on, and says so, when the rules cannot be moved', async () => {
+    const { ctx, moveProactive, moveReporting, updateHasClipHashingEnabled } =
+      makeCtx();
+    moveProactive.mockRejectedValueOnce(new Error('database down'));
+
+    await expect(update({}, { enabled: false }, ctx)).rejects.toThrow(
+      'database down',
+    );
+
+    expect(moveReporting).not.toHaveBeenCalled();
+    expect(updateHasClipHashingEnabled).not.toHaveBeenCalled();
+  });
+
+  it('leaves the rules alone when turning CLIP on', async () => {
+    const { ctx, moveProactive, moveReporting, updateHasClipHashingEnabled } =
+      makeCtx();
+
+    await update({}, { enabled: true }, ctx);
+
+    expect(moveProactive).not.toHaveBeenCalled();
+    expect(moveReporting).not.toHaveBeenCalled();
+    expect(updateHasClipHashingEnabled).toHaveBeenCalledWith({
+      orgId: 'org-1',
+      enabled: true,
+    });
+  });
+
+  it('moves nothing for a user without MANAGE_ORG', async () => {
+    const { ctx, moveProactive, updateHasClipHashingEnabled } = makeCtx({
+      permissions: [UserPermission.VIEW_MRT],
+    });
+
+    await expect(update({}, { enabled: false }, ctx)).rejects.toThrow(
+      'User does not have permission to update org settings',
+    );
+
+    expect(moveProactive).not.toHaveBeenCalled();
+    expect(updateHasClipHashingEnabled).not.toHaveBeenCalled();
+  });
+
+  describe('Org.clipRuleImpact', () => {
+    const Org = resolvers.Org as Record<
+      'clipRuleImpact',
+      (parent: { id: string }, args: unknown, ctx: unknown) => Promise<unknown>
+    >;
+
+    it('lists the active, routing and draft rules that use CLIP, with their kinds', async () => {
+      const { ctx, getRulesUsingSignal, getRoutingRulesUsingSignal } =
+        makeCtx();
+
+      await expect(
+        Org.clipRuleImpact({ id: 'org-1' }, {}, ctx),
+      ).resolves.toEqual({
+        activeRules: [
+          { id: 'p-live', name: 'Live proactive', kind: 'PROACTIVE' },
+          { id: 'r-live', name: 'Live reporting', kind: 'REPORTING' },
+        ],
+        routingRules: [
+          { id: 'route-1', name: 'Route images', kind: 'ROUTING' },
+        ],
+        draftRules: [
+          { id: 'p-draft', name: 'Drafted proactive', kind: 'PROACTIVE' },
+          { id: 'r-draft', name: 'Drafted reporting', kind: 'REPORTING' },
+        ],
+      });
+      expect(getRulesUsingSignal).toHaveBeenCalledWith({
+        orgId: 'org-1',
+        signalType: CLIP,
+        statuses: ['LIVE', 'BACKGROUND'],
+      });
+      expect(getRoutingRulesUsingSignal).toHaveBeenCalledWith({
+        orgId: 'org-1',
+        signalType: CLIP,
+      });
+    });
+
+    it('is only for org admins of that org', async () => {
+      const viewer = makeCtx({ permissions: [UserPermission.VIEW_MRT] }).ctx;
+      await expect(
+        Org.clipRuleImpact({ id: 'org-1' }, {}, viewer),
+      ).rejects.toThrow('User does not have permission');
+
+      const admin = makeCtx().ctx;
+      await expect(
+        Org.clipRuleImpact({ id: 'org-2' }, {}, admin),
       ).rejects.toThrow('User required.');
     });
   });

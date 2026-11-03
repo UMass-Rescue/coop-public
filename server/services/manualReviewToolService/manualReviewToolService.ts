@@ -882,6 +882,14 @@ export class ManualReviewToolService {
     return this.jobRouting.getRoutingRules(opts);
   }
 
+  /** The org's routing rules that use a signal, by name. */
+  async getRoutingRulesUsingSignal(opts: {
+    orgId: string;
+    signalType: string;
+  }) {
+    return this.jobRouting.getRoutingRulesUsingSignal(opts);
+  }
+
   /**
    * This method is used to get appeals routing rules for a specific organization.
    * @param orgId - The ID of the organization for which to fetch the routing rules.

@@ -492,6 +492,31 @@ export type GQLChangePasswordSuccessResponse = {
   readonly _?: Maybe<Scalars['Boolean']['output']>;
 };
 
+export type GQLClipRule = {
+  readonly __typename?: 'ClipRule';
+  readonly id: Scalars['ID']['output'];
+  readonly kind: GQLClipRuleKind;
+  readonly name: Scalars['String']['output'];
+};
+
+export type GQLClipRuleImpact = {
+  readonly __typename?: 'ClipRuleImpact';
+  /** Live or Background rules. Turning CLIP off moves them to Draft. */
+  readonly activeRules: ReadonlyArray<GQLClipRule>;
+  /** Draft rules that use CLIP. They stay in Draft until turned on by hand. */
+  readonly draftRules: ReadonlyArray<GQLClipRule>;
+  /** Routing rules have no Draft state: while CLIP is off they stop matching. */
+  readonly routingRules: ReadonlyArray<GQLClipRule>;
+};
+
+export const GQLClipRuleKind = {
+  Proactive: 'PROACTIVE',
+  Reporting: 'REPORTING',
+  Routing: 'ROUTING',
+} as const;
+
+export type GQLClipRuleKind =
+  (typeof GQLClipRuleKind)[keyof typeof GQLClipRuleKind];
 export type GQLCondition = GQLConditionSet | GQLLeafCondition;
 
 export const GQLConditionConjunction = {
@@ -1487,6 +1512,8 @@ export type GQLHashBank = {
   readonly hma_instance: GQLHashBankHmaInstance;
   readonly hma_name: Scalars['String']['output'];
   readonly id: Scalars['ID']['output'];
+  /** False while the bank cannot be used, for example a CLIP bank while CLIP is off for the org. */
+  readonly isAvailable: Scalars['Boolean']['output'];
   readonly name: Scalars['String']['output'];
   readonly org_id: Scalars['String']['output'];
 };
@@ -3433,6 +3460,11 @@ export type GQLOrg = {
   readonly banks?: Maybe<GQLMatchingBanks>;
   /** Whether this deployment has the optional CLIP instance, so the setting can be turned on. */
   readonly clipHashingAvailable: Scalars['Boolean']['output'];
+  /**
+   * The rules that use CLIP, so the settings page can say what turning CLIP off
+   * will change. Requires MANAGE_ORG.
+   */
+  readonly clipRuleImpact: GQLClipRuleImpact;
   readonly contentTypes: ReadonlyArray<GQLContentType>;
   readonly defaultInterfacePreferences: GQLUserInterfacePreferences;
   readonly email: Scalars['String']['output'];
@@ -6016,6 +6048,9 @@ export type GQLResolversTypes = {
     GQLResolversUnionTypes<GQLResolversTypes>['ChangePasswordResponse']
   >;
   ChangePasswordSuccessResponse: ResolverTypeWrapper<GQLChangePasswordSuccessResponse>;
+  ClipRule: ResolverTypeWrapper<GQLClipRule>;
+  ClipRuleImpact: ResolverTypeWrapper<GQLClipRuleImpact>;
+  ClipRuleKind: GQLClipRuleKind;
   Condition: ResolverTypeWrapper<Condition>;
   ConditionConjunction: GQLConditionConjunction;
   ConditionInput: GQLConditionInput;
@@ -6880,6 +6915,8 @@ export type GQLResolversParentTypes = {
   ChangePasswordInput: GQLChangePasswordInput;
   ChangePasswordResponse: GQLResolversUnionTypes<GQLResolversParentTypes>['ChangePasswordResponse'];
   ChangePasswordSuccessResponse: GQLChangePasswordSuccessResponse;
+  ClipRule: GQLClipRule;
+  ClipRuleImpact: GQLClipRuleImpact;
   Condition: Condition;
   ConditionInput: GQLConditionInput;
   ConditionInputField: Omit<GQLConditionInputField, 'spec'> & {
@@ -8083,6 +8120,38 @@ export type GQLChangePasswordSuccessResponseResolvers<
 > = {
   _?: Resolver<Maybe<GQLResolversTypes['Boolean']>, ParentType, ContextType>;
   __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
+};
+
+export type GQLClipRuleResolvers<
+  ContextType = Context,
+  ParentType extends GQLResolversParentTypes['ClipRule'] =
+    GQLResolversParentTypes['ClipRule'],
+> = {
+  id?: Resolver<GQLResolversTypes['ID'], ParentType, ContextType>;
+  kind?: Resolver<GQLResolversTypes['ClipRuleKind'], ParentType, ContextType>;
+  name?: Resolver<GQLResolversTypes['String'], ParentType, ContextType>;
+};
+
+export type GQLClipRuleImpactResolvers<
+  ContextType = Context,
+  ParentType extends GQLResolversParentTypes['ClipRuleImpact'] =
+    GQLResolversParentTypes['ClipRuleImpact'],
+> = {
+  activeRules?: Resolver<
+    ReadonlyArray<GQLResolversTypes['ClipRule']>,
+    ParentType,
+    ContextType
+  >;
+  draftRules?: Resolver<
+    ReadonlyArray<GQLResolversTypes['ClipRule']>,
+    ParentType,
+    ContextType
+  >;
+  routingRules?: Resolver<
+    ReadonlyArray<GQLResolversTypes['ClipRule']>,
+    ParentType,
+    ContextType
+  >;
 };
 
 export type GQLConditionResolvers<
@@ -9514,6 +9583,7 @@ export type GQLHashBankResolvers<
   >;
   hma_name?: Resolver<GQLResolversTypes['String'], ParentType, ContextType>;
   id?: Resolver<GQLResolversTypes['ID'], ParentType, ContextType>;
+  isAvailable?: Resolver<GQLResolversTypes['Boolean'], ParentType, ContextType>;
   name?: Resolver<GQLResolversTypes['String'], ParentType, ContextType>;
   org_id?: Resolver<GQLResolversTypes['String'], ParentType, ContextType>;
 };
@@ -12349,6 +12419,11 @@ export type GQLOrgResolvers<
   >;
   clipHashingAvailable?: Resolver<
     GQLResolversTypes['Boolean'],
+    ParentType,
+    ContextType
+  >;
+  clipRuleImpact?: Resolver<
+    GQLResolversTypes['ClipRuleImpact'],
     ParentType,
     ContextType
   >;
@@ -15583,6 +15658,8 @@ export type GQLResolvers<ContextType = Context> = {
   ChangePasswordError?: GQLChangePasswordErrorResolvers<ContextType>;
   ChangePasswordResponse?: GQLChangePasswordResponseResolvers<ContextType>;
   ChangePasswordSuccessResponse?: GQLChangePasswordSuccessResponseResolvers<ContextType>;
+  ClipRule?: GQLClipRuleResolvers<ContextType>;
+  ClipRuleImpact?: GQLClipRuleImpactResolvers<ContextType>;
   Condition?: GQLConditionResolvers<ContextType>;
   ConditionInputField?: GQLConditionInputFieldResolvers<ContextType>;
   ConditionResult?: GQLConditionResultResolvers<ContextType>;

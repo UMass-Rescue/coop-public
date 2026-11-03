@@ -63,6 +63,16 @@ function parseCredentialJson(
   return parsed as ExchangeCredentialJson;
 }
 
+/** The org's banks, including the ones that cannot be used right now. */
+export async function listBanksForGraphql(context: Context, orgId: string) {
+  const banks =
+    await context.services.HMAHashBankService.listBanksWithAvailability(orgId);
+  return banks.map(({ bank, available }) => ({
+    ...bank,
+    isAvailable: available,
+  }));
+}
+
 function toGraphQLError(e: unknown): unknown {
   return e instanceof HashBankUserError ? userInputError(e.message) : e;
 }
@@ -74,7 +84,7 @@ const Query: GQLQueryResolvers<Context> = {
       throw unauthenticatedError('User required.');
     }
 
-    return context.services.HMAHashBankService.listBanks(user.orgId);
+    return listBanksForGraphql(context, user.orgId);
   },
 
   async hashBank(_: unknown, { name }: { name: string }, context: Context) {
@@ -308,6 +318,12 @@ const Mutation: GQLMutationResolvers<Context> = {
 };
 
 const HashBank = {
+  // Only the list resolvers know a bank is unavailable. A bank fetched or
+  // changed on its own is returned by the service only when it is usable.
+  isAvailable(parent: { isAvailable?: boolean }) {
+    return parent.isAvailable ?? true;
+  },
+
   async exchange(
     parent: { hma_name: string; hma_instance: HmaInstance },
     _args: unknown,

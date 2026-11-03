@@ -5,7 +5,7 @@ import {
   HashBankUserError,
   type HashBank,
 } from '../../../services/hmaService/index.js';
-import { resolvers } from './resolvers.js';
+import { listBanksForGraphql, resolvers } from './resolvers.js';
 
 const MOCK_BANK: HashBank = {
   id: 1,
@@ -52,6 +52,53 @@ async function errorText(promise: Promise<unknown>): Promise<string> {
 }
 
 describe('hashBanks resolvers', () => {
+  describe('bank availability', () => {
+    const CLIP_BANK: HashBank = {
+      ...MOCK_BANK,
+      id: 2,
+      name: 'clip bank',
+      hma_name: 'COOP_ORG1_CLIP_BANK',
+      hma_instance: 'CLIP',
+    };
+    const listBanksWithAvailability = vi.fn().mockResolvedValue([
+      { bank: MOCK_BANK, available: true },
+      { bank: CLIP_BANK, available: false },
+    ]);
+
+    it('Query.hashBanks returns every bank with whether it can be used', async () => {
+      const ctx = makeContext({ listBanksWithAvailability });
+      const banks = await (resolvers.Query as any).hashBanks({}, {}, ctx);
+
+      expect(
+        banks.map((b: { name: string; isAvailable: boolean }) => [
+          b.name,
+          b.isAvailable,
+        ]),
+      ).toEqual([
+        ['test bank', true],
+        ['clip bank', false],
+      ]);
+    });
+
+    it('listBanksForGraphql, shared with the Org field, marks each bank', async () => {
+      const ctx = makeContext({ listBanksWithAvailability });
+      const banks = await listBanksForGraphql(ctx as never, 'org1');
+
+      expect(banks.map((b) => b.isAvailable)).toEqual([true, false]);
+    });
+
+    it('HashBank.isAvailable is true for a bank the service returned on its own', () => {
+      expect(
+        resolvers.HashBank.isAvailable(
+          MOCK_BANK as HashBank & { isAvailable?: boolean },
+        ),
+      ).toBe(true);
+      expect(resolvers.HashBank.isAvailable({ isAvailable: false })).toBe(
+        false,
+      );
+    });
+  });
+
   describe('Mutation.createHashBank', () => {
     it('creates a bank without exchange', async () => {
       const ctx = makeContext();

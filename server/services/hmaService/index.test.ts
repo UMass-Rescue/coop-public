@@ -1855,6 +1855,24 @@ describe('HmaService', () => {
       });
 
       describe('when CLIP is not deployed', () => {
+        it('lists CLIP banks as unavailable, without calling HMA for them', async () => {
+          const mockDb = makeMockKyselyPg({ banks: [MOCK_BANK, CLIP_BANK] });
+          const fetchHTTP = routeFetch({
+            'GET /c/bank/COOP_ORG1_TEST_BANK': ok({}),
+          });
+          const svc = makeClipService(fetchHTTP, null, { mockDb });
+
+          const banks = await svc.listBanksWithAvailability('org1');
+
+          expect(banks.map((b) => [b.bank.name, b.available])).toEqual([
+            ['test bank', true],
+            [CLIP_BANK.name, false],
+          ]);
+          expect(urlsOf(fetchHTTP).some((u) => u.includes('CLIP_BANK'))).toBe(
+            false,
+          );
+        });
+
         it('hides CLIP banks from listBanks without calling HMA or deleting them', async () => {
           const mockDb = makeMockKyselyPg({ banks: [MOCK_BANK, CLIP_BANK] });
           const fetchHTTP = routeFetch({
@@ -1910,6 +1928,25 @@ describe('HmaService', () => {
 
       describe('when the org has turned CLIP off', () => {
         const orgOff = () => makeOrgSettings(false);
+
+        it('lists CLIP banks as unavailable, and never deletes them', async () => {
+          const mockDb = makeMockKyselyPg({ banks: [MOCK_BANK, CLIP_BANK] });
+          const fetchHTTP = routeFetch({
+            'GET /c/bank/COOP_ORG1_TEST_BANK': ok({}),
+          });
+          const svc = makeClipService(fetchHTTP, CLIP_URL, {
+            mockDb,
+            orgSettings: orgOff(),
+          });
+
+          const banks = await svc.listBanksWithAvailability('org1');
+
+          expect(banks.map((b) => [b.bank.name, b.available])).toEqual([
+            ['test bank', true],
+            [CLIP_BANK.name, false],
+          ]);
+          expect(mockDb.deleteFrom).not.toHaveBeenCalled();
+        });
 
         it('hides CLIP banks from listBanks without deleting them', async () => {
           const mockDb = makeMockKyselyPg({ banks: [MOCK_BANK, CLIP_BANK] });
