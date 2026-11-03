@@ -39,6 +39,7 @@ import type {
 } from '../services/manualReviewToolService/index.js';
 import type { ManualReviewJobComment } from '../services/manualReviewToolService/modules/CommentOperations.js';
 import type { RoutingRuleWithoutVersion } from '../services/manualReviewToolService/modules/JobRouting.js';
+import type { ActivityRow } from '../services/moderationActivityFeed/index.js';
 import type {
   Condition,
   ConditionSet,
@@ -270,6 +271,14 @@ export type GQLActionStatisticsInput = {
   readonly timeZone: Scalars['String']['input'];
 };
 
+export const GQLActivityView = {
+  Actions: 'ACTIONS',
+  All: 'ALL',
+  Decisions: 'DECISIONS',
+} as const;
+
+export type GQLActivityView =
+  (typeof GQLActivityView)[keyof typeof GQLActivityView];
 export type GQLAddAccessibleQueuesToUserInput = {
   readonly queueIds: ReadonlyArray<Scalars['ID']['input']>;
   readonly userId: Scalars['ID']['input'];
@@ -1660,6 +1669,26 @@ export type GQLIntegrationNoInputCredentialsError = GQLError & {
   readonly type: ReadonlyArray<Scalars['String']['output']>;
 };
 
+export type GQLInvalidItemTypeHiddenFieldsError = GQLError & {
+  readonly __typename?: 'InvalidItemTypeHiddenFieldsError';
+  readonly detail?: Maybe<Scalars['String']['output']>;
+  readonly pointer?: Maybe<Scalars['String']['output']>;
+  readonly requestId?: Maybe<Scalars['String']['output']>;
+  readonly status: Scalars['Int']['output'];
+  readonly title: Scalars['String']['output'];
+  readonly type: ReadonlyArray<Scalars['String']['output']>;
+};
+
+export type GQLInvalidItemTypeSchemaError = GQLError & {
+  readonly __typename?: 'InvalidItemTypeSchemaError';
+  readonly detail?: Maybe<Scalars['String']['output']>;
+  readonly pointer?: Maybe<Scalars['String']['output']>;
+  readonly requestId?: Maybe<Scalars['String']['output']>;
+  readonly status: Scalars['Int']['output'];
+  readonly title: Scalars['String']['output'];
+  readonly type: ReadonlyArray<Scalars['String']['output']>;
+};
+
 export type GQLInvalidateReportsFromReporterInput = {
   /**
    * Scopes the sweep to a single MRT job. When omitted, every pending job
@@ -2304,6 +2333,47 @@ export const GQLLookbackVersion = {
 
 export type GQLLookbackVersion =
   (typeof GQLLookbackVersion)[keyof typeof GQLLookbackVersion];
+export type GQLManualActionItem = {
+  readonly __typename?: 'ManualActionItem';
+  readonly failed: Scalars['Boolean']['output'];
+  readonly itemId: Scalars['ID']['output'];
+  readonly itemTypeId?: Maybe<Scalars['ID']['output']>;
+};
+
+export type GQLManualActionItemsInput = {
+  readonly correlationId: Scalars['ID']['input'];
+  /** Defaults to 100, capped at 500. */
+  readonly limit?: InputMaybe<Scalars['Int']['input']>;
+  /** max(ts) of the operation, from its feed row. Bounds the partition scan. */
+  readonly occurredAt: Scalars['DateTime']['input'];
+};
+
+export type GQLManualActionItemsPage = {
+  readonly __typename?: 'ManualActionItemsPage';
+  readonly items: ReadonlyArray<GQLManualActionItem>;
+  readonly totalCount: Scalars['Int']['output'];
+};
+
+/**
+ * One operation a moderator ran outside a review job, from Bulk Actioning or
+ * Investigation. These produce no manual review decision, so they are otherwise
+ * invisible outside the actioned item's own history. A bulk run writes one
+ * execution per item per action; this collapses those into a single row.
+ */
+export type GQLManualActionRow = GQLModerationActivityRow & {
+  readonly __typename?: 'ManualActionRow';
+  readonly actionIds: ReadonlyArray<Scalars['ID']['output']>;
+  readonly actorNote?: Maybe<Scalars['String']['output']>;
+  readonly correlationId: Scalars['ID']['output'];
+  readonly failedCount: Scalars['Int']['output'];
+  readonly id: Scalars['ID']['output'];
+  readonly itemCount: Scalars['Int']['output'];
+  readonly itemTypeId?: Maybe<Scalars['ID']['output']>;
+  readonly policyIds: ReadonlyArray<Scalars['ID']['output']>;
+  readonly reviewerId?: Maybe<Scalars['ID']['output']>;
+  readonly ts: Scalars['DateTime']['output'];
+};
+
 export type GQLManualReviewChartConfigurationsInput = {
   readonly chartConfigurations: ReadonlyArray<GQLManualReviewChartSettingsInput>;
 };
@@ -2545,6 +2615,20 @@ export type GQLModelCardSubsection = {
   readonly title: Scalars['String']['output'];
 };
 
+export type GQLModerationActivityPage = {
+  readonly __typename?: 'ModerationActivityPage';
+  /** Null means the end of the feed. */
+  readonly nextCursor?: Maybe<Scalars['Cursor']['output']>;
+  readonly rows: ReadonlyArray<GQLModerationActivityRow>;
+};
+
+/** Fields every row in the merged activity feed carries, regardless of kind. */
+export type GQLModerationActivityRow = {
+  readonly id: Scalars['ID']['output'];
+  readonly reviewerId?: Maybe<Scalars['ID']['output']>;
+  readonly ts: Scalars['DateTime']['output'];
+};
+
 export type GQLModeratorSafetySettingsInput = {
   readonly moderatorSafetyBlurLevel: Scalars['Int']['input'];
   readonly moderatorSafetyGrayscale: Scalars['Boolean']['input'];
@@ -2598,7 +2682,11 @@ export type GQLMutateBankResponse = {
 };
 
 export type GQLMutateContentItemTypeResponse =
-  GQLItemTypeNameAlreadyExistsError | GQLMutateContentTypeSuccessResponse;
+  | GQLInvalidItemTypeHiddenFieldsError
+  | GQLInvalidItemTypeSchemaError
+  | GQLItemTypeNameAlreadyExistsError
+  | GQLMutateContentTypeSuccessResponse
+  | GQLNotFoundError;
 
 export type GQLMutateContentRuleSuccessResponse = {
   readonly __typename?: 'MutateContentRuleSuccessResponse';
@@ -2648,7 +2736,11 @@ export type GQLMutateRoutingRulesOrderSuccessResponse = {
 };
 
 export type GQLMutateThreadItemTypeResponse =
-  GQLItemTypeNameAlreadyExistsError | GQLMutateThreadTypeSuccessResponse;
+  | GQLInvalidItemTypeHiddenFieldsError
+  | GQLInvalidItemTypeSchemaError
+  | GQLItemTypeNameAlreadyExistsError
+  | GQLMutateThreadTypeSuccessResponse
+  | GQLNotFoundError;
 
 export type GQLMutateThreadTypeSuccessResponse = {
   readonly __typename?: 'MutateThreadTypeSuccessResponse';
@@ -2656,7 +2748,11 @@ export type GQLMutateThreadTypeSuccessResponse = {
 };
 
 export type GQLMutateUserItemTypeResponse =
-  GQLItemTypeNameAlreadyExistsError | GQLMutateUserTypeSuccessResponse;
+  | GQLInvalidItemTypeHiddenFieldsError
+  | GQLInvalidItemTypeSchemaError
+  | GQLItemTypeNameAlreadyExistsError
+  | GQLMutateUserTypeSuccessResponse
+  | GQLNotFoundError;
 
 export type GQLMutateUserRuleSuccessResponse = {
   readonly __typename?: 'MutateUserRuleSuccessResponse';
@@ -3484,7 +3580,6 @@ export type GQLOrg = {
   readonly id: Scalars['ID']['output'];
   readonly ignoreCallbackUrl?: Maybe<Scalars['String']['output']>;
   readonly integrationConfigs: ReadonlyArray<GQLIntegrationConfig>;
-  readonly isDemoOrg: Scalars['Boolean']['output'];
   readonly itemTypes: ReadonlyArray<GQLItemType>;
   readonly jobPriorityWeights: ReadonlyArray<GQLJobPriorityWeight>;
   readonly mrtQueues: ReadonlyArray<GQLManualReviewQueue>;
@@ -3741,6 +3836,7 @@ export type GQLQuery = {
   readonly latestItemsCreatedBy: ReadonlyArray<GQLItemSubmissions>;
   readonly latestItemsCreatedByWithThread: ReadonlyArray<GQLThreadWithMessages>;
   readonly locationBank?: Maybe<GQLLocationBank>;
+  readonly manualActionItems: GQLManualActionItemsPage;
   readonly manualReviewQueue?: Maybe<GQLManualReviewQueue>;
   readonly me?: Maybe<GQLUser>;
   readonly myOrg?: Maybe<GQLOrg>;
@@ -3753,6 +3849,7 @@ export type GQLQuery = {
   /** Server-owned grouping + ordering for the role-editor UI. Gated on MANAGE_ROLES. */
   readonly permissionGroups: ReadonlyArray<GQLPermissionGroup>;
   readonly policy?: Maybe<GQLPolicy>;
+  readonly recentModerationActivity: GQLModerationActivityPage;
   readonly recentUserStrikeActions: ReadonlyArray<GQLRecentUserStrikeActions>;
   readonly reportingInsights: GQLReportingInsights;
   readonly reportingRule?: Maybe<GQLReportingRule>;
@@ -3923,6 +4020,10 @@ export type GQLQueryLocationBankArgs = {
   id: Scalars['ID']['input'];
 };
 
+export type GQLQueryManualActionItemsArgs = {
+  input: GQLManualActionItemsInput;
+};
+
 export type GQLQueryManualReviewQueueArgs = {
   id: Scalars['ID']['input'];
 };
@@ -3946,6 +4047,10 @@ export type GQLQueryPartialItemsArgs = {
 
 export type GQLQueryPolicyArgs = {
   id: Scalars['ID']['input'];
+};
+
+export type GQLQueryRecentModerationActivityArgs = {
+  input: GQLRecentModerationActivityInput;
 };
 
 export type GQLQueryRecentUserStrikeActionsArgs = {
@@ -4059,6 +4164,23 @@ export type GQLRecentManualReviewTransformJobAndRecreateInQueueDecision = {
 
 export type GQLRecentManualReviewUserOrRelatedActionDecision = {
   readonly actionIds: ReadonlyArray<Scalars['ID']['input']>;
+};
+
+export type GQLRecentModerationActivityInput = {
+  /** Opaque cursor from a previous page. Absent for the newest page. */
+  readonly cursor?: InputMaybe<Scalars['Cursor']['input']>;
+  readonly decisions?: InputMaybe<
+    ReadonlyArray<GQLRecentManualReviewDecisionType>
+  >;
+  readonly endTime?: InputMaybe<Scalars['DateTime']['input']>;
+  /** Rows per page. Defaults to 100, capped at 100. */
+  readonly limit?: InputMaybe<Scalars['Int']['input']>;
+  readonly policyIds?: InputMaybe<ReadonlyArray<Scalars['ID']['input']>>;
+  readonly queueIds?: InputMaybe<ReadonlyArray<Scalars['ID']['input']>>;
+  readonly reviewerIds?: InputMaybe<ReadonlyArray<Scalars['ID']['input']>>;
+  readonly startTime?: InputMaybe<Scalars['DateTime']['input']>;
+  readonly userSearchString?: InputMaybe<Scalars['String']['input']>;
+  readonly view?: InputMaybe<GQLActivityView>;
 };
 
 export type GQLRecentUserStrikeActions = {
@@ -4272,6 +4394,21 @@ export type GQLRetryNcmecSubmissionResponse = {
    */
   readonly error?: Maybe<Scalars['String']['output']>;
   readonly success: Scalars['Boolean']['output'];
+};
+
+export type GQLReviewJobDecisionRow = GQLModerationActivityRow & {
+  readonly __typename?: 'ReviewJobDecisionRow';
+  readonly assignedAt?: Maybe<Scalars['DateTime']['output']>;
+  readonly decisionReason?: Maybe<Scalars['String']['output']>;
+  readonly decisions: ReadonlyArray<GQLManualReviewDecisionComponent>;
+  readonly id: Scalars['ID']['output'];
+  readonly itemId?: Maybe<Scalars['ID']['output']>;
+  readonly itemTypeId?: Maybe<Scalars['ID']['output']>;
+  readonly jobCreatedAt?: Maybe<Scalars['DateTime']['output']>;
+  readonly jobId?: Maybe<Scalars['String']['output']>;
+  readonly queueId?: Maybe<Scalars['ID']['output']>;
+  readonly reviewerId?: Maybe<Scalars['ID']['output']>;
+  readonly ts: Scalars['DateTime']['output'];
 };
 
 export type GQLRole = {
@@ -5793,10 +5930,13 @@ export type GQLResolversUnionTypes<_RefType extends Record<string, unknown>> = {
         data: _RefType['CustomAction'];
       });
   MutateContentItemTypeResponse:
+    | GQLInvalidItemTypeHiddenFieldsError
+    | GQLInvalidItemTypeSchemaError
     | GQLItemTypeNameAlreadyExistsError
     | (Omit<GQLMutateContentTypeSuccessResponse, 'data'> & {
         data?: Maybe<_RefType['ContentItemType']>;
-      });
+      })
+    | GQLNotFoundError;
   MutateHashBankResponse:
     | GQLMatchingBankNameExistsError
     | (Omit<GQLMutateHashBankSuccessResponse, 'data'> & {
@@ -5808,15 +5948,21 @@ export type GQLResolversUnionTypes<_RefType extends Record<string, unknown>> = {
         data: _RefType['LocationBank'];
       });
   MutateThreadItemTypeResponse:
+    | GQLInvalidItemTypeHiddenFieldsError
+    | GQLInvalidItemTypeSchemaError
     | GQLItemTypeNameAlreadyExistsError
     | (Omit<GQLMutateThreadTypeSuccessResponse, 'data'> & {
         data?: Maybe<_RefType['ThreadItemType']>;
-      });
+      })
+    | GQLNotFoundError;
   MutateUserItemTypeResponse:
+    | GQLInvalidItemTypeHiddenFieldsError
+    | GQLInvalidItemTypeSchemaError
     | GQLItemTypeNameAlreadyExistsError
     | (Omit<GQLMutateUserTypeSuccessResponse, 'data'> & {
         data?: Maybe<_RefType['UserItemType']>;
-      });
+      })
+    | GQLNotFoundError;
   PartialItemsResponse:
     | GQLPartialItemsEndpointResponseError
     | GQLPartialItemsInvalidResponseError
@@ -5922,6 +6068,8 @@ export type GQLResolversInterfaceTypes<
     | GQLIntegrationConfigUnsupportedIntegrationError
     | GQLIntegrationEmptyInputCredentialsError
     | GQLIntegrationNoInputCredentialsError
+    | GQLInvalidItemTypeHiddenFieldsError
+    | GQLInvalidItemTypeSchemaError
     | GQLInviteUserTokenExpiredError
     | GQLInviteUserTokenMissingError
     | GQLItemTypeNameAlreadyExistsError
@@ -5970,6 +6118,7 @@ export type GQLResolversInterfaceTypes<
     | GQLSubmitNcmecReportDecisionComponent
     | GQLTransformJobAndRecreateInQueueDecisionComponent
     | GQLUserOrRelatedActionDecisionComponent;
+  ModerationActivityRow: ActivityRow | ActivityRow;
   Rule: GraphQLRuleParent | GraphQLRuleParent;
 };
 
@@ -5993,6 +6142,7 @@ export type GQLResolversTypes = {
   ActionStatisticsFilters: GQLActionStatisticsFilters;
   ActionStatisticsGroupByColumns: GQLActionStatisticsGroupByColumns;
   ActionStatisticsInput: GQLActionStatisticsInput;
+  ActivityView: GQLActivityView;
   AddAccessibleQueuesToUserInput: GQLAddAccessibleQueuesToUserInput;
   AddAccessibleQueuesToUserResponse: ResolverTypeWrapper<
     GQLResolversUnionTypes<GQLResolversTypes>['AddAccessibleQueuesToUserResponse']
@@ -6262,6 +6412,8 @@ export type GQLResolversTypes = {
   IntegrationEmptyInputCredentialsError: ResolverTypeWrapper<GQLIntegrationEmptyInputCredentialsError>;
   IntegrationMetadata: ResolverTypeWrapper<GQLIntegrationMetadata>;
   IntegrationNoInputCredentialsError: ResolverTypeWrapper<GQLIntegrationNoInputCredentialsError>;
+  InvalidItemTypeHiddenFieldsError: ResolverTypeWrapper<GQLInvalidItemTypeHiddenFieldsError>;
+  InvalidItemTypeSchemaError: ResolverTypeWrapper<GQLInvalidItemTypeSchemaError>;
   InvalidateReportsFromReporterInput: GQLInvalidateReportsFromReporterInput;
   InvalidateReportsFromReporterSuccessResponse: ResolverTypeWrapper<GQLInvalidateReportsFromReporterSuccessResponse>;
   InviteUserInput: GQLInviteUserInput;
@@ -6353,6 +6505,10 @@ export type GQLResolversTypes = {
   >;
   LoginUserDoesNotExistError: ResolverTypeWrapper<GQLLoginUserDoesNotExistError>;
   LookbackVersion: GQLLookbackVersion;
+  ManualActionItem: ResolverTypeWrapper<GQLManualActionItem>;
+  ManualActionItemsInput: GQLManualActionItemsInput;
+  ManualActionItemsPage: ResolverTypeWrapper<GQLManualActionItemsPage>;
+  ManualActionRow: ResolverTypeWrapper<ActivityRow>;
   ManualReviewChartConfigurationsInput: GQLManualReviewChartConfigurationsInput;
   ManualReviewChartMetric: GQLManualReviewChartMetric;
   ManualReviewChartSettings: ResolverTypeWrapper<
@@ -6411,6 +6567,12 @@ export type GQLResolversTypes = {
   ModelCardField: ResolverTypeWrapper<GQLModelCardField>;
   ModelCardSection: ResolverTypeWrapper<GQLModelCardSection>;
   ModelCardSubsection: ResolverTypeWrapper<GQLModelCardSubsection>;
+  ModerationActivityPage: ResolverTypeWrapper<
+    Omit<GQLModerationActivityPage, 'rows'> & {
+      rows: ReadonlyArray<GQLResolversTypes['ModerationActivityRow']>;
+    }
+  >;
+  ModerationActivityRow: ResolverTypeWrapper<ActivityRow>;
   ModeratorSafetySettingsInput: GQLModeratorSafetySettingsInput;
   MrtClearReportsDisposition: GQLMrtClearReportsDisposition;
   MrtClearReportsScope: GQLMrtClearReportsScope;
@@ -6579,6 +6741,7 @@ export type GQLResolversTypes = {
   RecentManualReviewSubmitNCMECReportDecision: GQLRecentManualReviewSubmitNcmecReportDecision;
   RecentManualReviewTransformJobAndRecreateInQueueDecision: GQLRecentManualReviewTransformJobAndRecreateInQueueDecision;
   RecentManualReviewUserOrRelatedActionDecision: GQLRecentManualReviewUserOrRelatedActionDecision;
+  RecentModerationActivityInput: GQLRecentModerationActivityInput;
   RecentUserStrikeActions: ResolverTypeWrapper<GQLRecentUserStrikeActions>;
   RecentUserStrikeActionsInput: GQLRecentUserStrikeActionsInput;
   RecommendedThresholds: ResolverTypeWrapper<GQLRecommendedThresholds>;
@@ -6621,6 +6784,7 @@ export type GQLResolversTypes = {
   ResetPasswordInput: GQLResetPasswordInput;
   ResolvedJobCount: ResolverTypeWrapper<GQLResolvedJobCount>;
   RetryNcmecSubmissionResponse: ResolverTypeWrapper<GQLRetryNcmecSubmissionResponse>;
+  ReviewJobDecisionRow: ResolverTypeWrapper<ActivityRow>;
   Role: ResolverTypeWrapper<RoleParent>;
   RotateApiKeyError: ResolverTypeWrapper<GQLRotateApiKeyError>;
   RotateApiKeyInput: GQLRotateApiKeyInput;
@@ -7069,6 +7233,8 @@ export type GQLResolversParentTypes = {
   IntegrationEmptyInputCredentialsError: GQLIntegrationEmptyInputCredentialsError;
   IntegrationMetadata: GQLIntegrationMetadata;
   IntegrationNoInputCredentialsError: GQLIntegrationNoInputCredentialsError;
+  InvalidItemTypeHiddenFieldsError: GQLInvalidItemTypeHiddenFieldsError;
+  InvalidItemTypeSchemaError: GQLInvalidItemTypeSchemaError;
   InvalidateReportsFromReporterInput: GQLInvalidateReportsFromReporterInput;
   InvalidateReportsFromReporterSuccessResponse: GQLInvalidateReportsFromReporterSuccessResponse;
   InviteUserInput: GQLInviteUserInput;
@@ -7135,6 +7301,10 @@ export type GQLResolversParentTypes = {
     user: GQLResolversParentTypes['User'];
   };
   LoginUserDoesNotExistError: GQLLoginUserDoesNotExistError;
+  ManualActionItem: GQLManualActionItem;
+  ManualActionItemsInput: GQLManualActionItemsInput;
+  ManualActionItemsPage: GQLManualActionItemsPage;
+  ManualActionRow: ActivityRow;
   ManualReviewChartConfigurationsInput: GQLManualReviewChartConfigurationsInput;
   ManualReviewChartSettings: GQLResolversUnionTypes<GQLResolversParentTypes>['ManualReviewChartSettings'];
   ManualReviewChartSettingsInput: GQLManualReviewChartSettingsInput;
@@ -7179,6 +7349,10 @@ export type GQLResolversParentTypes = {
   ModelCardField: GQLModelCardField;
   ModelCardSection: GQLModelCardSection;
   ModelCardSubsection: GQLModelCardSubsection;
+  ModerationActivityPage: Omit<GQLModerationActivityPage, 'rows'> & {
+    rows: ReadonlyArray<GQLResolversParentTypes['ModerationActivityRow']>;
+  };
+  ModerationActivityRow: ActivityRow;
   ModeratorSafetySettingsInput: GQLModeratorSafetySettingsInput;
   MrtJobEnqueueSourceInfo: GQLMrtJobEnqueueSourceInfo;
   MutateAccessibleQueuesForUserSuccessResponse: GQLMutateAccessibleQueuesForUserSuccessResponse;
@@ -7301,6 +7475,7 @@ export type GQLResolversParentTypes = {
   RecentManualReviewSubmitNCMECReportDecision: GQLRecentManualReviewSubmitNcmecReportDecision;
   RecentManualReviewTransformJobAndRecreateInQueueDecision: GQLRecentManualReviewTransformJobAndRecreateInQueueDecision;
   RecentManualReviewUserOrRelatedActionDecision: GQLRecentManualReviewUserOrRelatedActionDecision;
+  RecentModerationActivityInput: GQLRecentModerationActivityInput;
   RecentUserStrikeActions: GQLRecentUserStrikeActions;
   RecentUserStrikeActionsInput: GQLRecentUserStrikeActionsInput;
   RecommendedThresholds: GQLRecommendedThresholds;
@@ -7337,6 +7512,7 @@ export type GQLResolversParentTypes = {
   ResetPasswordInput: GQLResetPasswordInput;
   ResolvedJobCount: GQLResolvedJobCount;
   RetryNcmecSubmissionResponse: GQLRetryNcmecSubmissionResponse;
+  ReviewJobDecisionRow: ActivityRow;
   Role: RoleParent;
   RotateApiKeyError: GQLRotateApiKeyError;
   RotateApiKeyInput: GQLRotateApiKeyInput;
@@ -9251,6 +9427,8 @@ export type GQLErrorResolvers<
     | 'IntegrationConfigUnsupportedIntegrationError'
     | 'IntegrationEmptyInputCredentialsError'
     | 'IntegrationNoInputCredentialsError'
+    | 'InvalidItemTypeHiddenFieldsError'
+    | 'InvalidItemTypeSchemaError'
     | 'InviteUserTokenExpiredError'
     | 'InviteUserTokenMissingError'
     | 'ItemTypeNameAlreadyExistsError'
@@ -9845,6 +10023,67 @@ export type GQLIntegrationNoInputCredentialsErrorResolvers<
   ParentType extends
     GQLResolversParentTypes['IntegrationNoInputCredentialsError'] =
     GQLResolversParentTypes['IntegrationNoInputCredentialsError'],
+> = {
+  detail?: Resolver<
+    Maybe<GQLResolversTypes['String']>,
+    ParentType,
+    ContextType
+  >;
+  pointer?: Resolver<
+    Maybe<GQLResolversTypes['String']>,
+    ParentType,
+    ContextType
+  >;
+  requestId?: Resolver<
+    Maybe<GQLResolversTypes['String']>,
+    ParentType,
+    ContextType
+  >;
+  status?: Resolver<GQLResolversTypes['Int'], ParentType, ContextType>;
+  title?: Resolver<GQLResolversTypes['String'], ParentType, ContextType>;
+  type?: Resolver<
+    ReadonlyArray<GQLResolversTypes['String']>,
+    ParentType,
+    ContextType
+  >;
+  __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
+};
+
+export type GQLInvalidItemTypeHiddenFieldsErrorResolvers<
+  ContextType = Context,
+  ParentType extends
+    GQLResolversParentTypes['InvalidItemTypeHiddenFieldsError'] =
+    GQLResolversParentTypes['InvalidItemTypeHiddenFieldsError'],
+> = {
+  detail?: Resolver<
+    Maybe<GQLResolversTypes['String']>,
+    ParentType,
+    ContextType
+  >;
+  pointer?: Resolver<
+    Maybe<GQLResolversTypes['String']>,
+    ParentType,
+    ContextType
+  >;
+  requestId?: Resolver<
+    Maybe<GQLResolversTypes['String']>,
+    ParentType,
+    ContextType
+  >;
+  status?: Resolver<GQLResolversTypes['Int'], ParentType, ContextType>;
+  title?: Resolver<GQLResolversTypes['String'], ParentType, ContextType>;
+  type?: Resolver<
+    ReadonlyArray<GQLResolversTypes['String']>,
+    ParentType,
+    ContextType
+  >;
+  __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
+};
+
+export type GQLInvalidItemTypeSchemaErrorResolvers<
+  ContextType = Context,
+  ParentType extends GQLResolversParentTypes['InvalidItemTypeSchemaError'] =
+    GQLResolversParentTypes['InvalidItemTypeSchemaError'],
 > = {
   detail?: Resolver<
     Maybe<GQLResolversTypes['String']>,
@@ -10622,6 +10861,71 @@ export type GQLLoginUserDoesNotExistErrorResolvers<
   __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
 };
 
+export type GQLManualActionItemResolvers<
+  ContextType = Context,
+  ParentType extends GQLResolversParentTypes['ManualActionItem'] =
+    GQLResolversParentTypes['ManualActionItem'],
+> = {
+  failed?: Resolver<GQLResolversTypes['Boolean'], ParentType, ContextType>;
+  itemId?: Resolver<GQLResolversTypes['ID'], ParentType, ContextType>;
+  itemTypeId?: Resolver<
+    Maybe<GQLResolversTypes['ID']>,
+    ParentType,
+    ContextType
+  >;
+};
+
+export type GQLManualActionItemsPageResolvers<
+  ContextType = Context,
+  ParentType extends GQLResolversParentTypes['ManualActionItemsPage'] =
+    GQLResolversParentTypes['ManualActionItemsPage'],
+> = {
+  items?: Resolver<
+    ReadonlyArray<GQLResolversTypes['ManualActionItem']>,
+    ParentType,
+    ContextType
+  >;
+  totalCount?: Resolver<GQLResolversTypes['Int'], ParentType, ContextType>;
+};
+
+export type GQLManualActionRowResolvers<
+  ContextType = Context,
+  ParentType extends GQLResolversParentTypes['ManualActionRow'] =
+    GQLResolversParentTypes['ManualActionRow'],
+> = {
+  actionIds?: Resolver<
+    ReadonlyArray<GQLResolversTypes['ID']>,
+    ParentType,
+    ContextType
+  >;
+  actorNote?: Resolver<
+    Maybe<GQLResolversTypes['String']>,
+    ParentType,
+    ContextType
+  >;
+  correlationId?: Resolver<GQLResolversTypes['ID'], ParentType, ContextType>;
+  failedCount?: Resolver<GQLResolversTypes['Int'], ParentType, ContextType>;
+  id?: Resolver<GQLResolversTypes['ID'], ParentType, ContextType>;
+  itemCount?: Resolver<GQLResolversTypes['Int'], ParentType, ContextType>;
+  itemTypeId?: Resolver<
+    Maybe<GQLResolversTypes['ID']>,
+    ParentType,
+    ContextType
+  >;
+  policyIds?: Resolver<
+    ReadonlyArray<GQLResolversTypes['ID']>,
+    ParentType,
+    ContextType
+  >;
+  reviewerId?: Resolver<
+    Maybe<GQLResolversTypes['ID']>,
+    ParentType,
+    ContextType
+  >;
+  ts?: Resolver<GQLResolversTypes['DateTime'], ParentType, ContextType>;
+  __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
+};
+
 export type GQLManualReviewChartSettingsResolvers<
   ContextType = Context,
   ParentType extends GQLResolversParentTypes['ManualReviewChartSettings'] =
@@ -11142,6 +11446,35 @@ export type GQLModelCardSubsectionResolvers<
   title?: Resolver<GQLResolversTypes['String'], ParentType, ContextType>;
 };
 
+export type GQLModerationActivityPageResolvers<
+  ContextType = Context,
+  ParentType extends GQLResolversParentTypes['ModerationActivityPage'] =
+    GQLResolversParentTypes['ModerationActivityPage'],
+> = {
+  nextCursor?: Resolver<
+    Maybe<GQLResolversTypes['Cursor']>,
+    ParentType,
+    ContextType
+  >;
+  rows?: Resolver<
+    ReadonlyArray<GQLResolversTypes['ModerationActivityRow']>,
+    ParentType,
+    ContextType
+  >;
+};
+
+export type GQLModerationActivityRowResolvers<
+  ContextType = Context,
+  ParentType extends GQLResolversParentTypes['ModerationActivityRow'] =
+    GQLResolversParentTypes['ModerationActivityRow'],
+> = {
+  __resolveType: TypeResolveFn<
+    'ManualActionRow' | 'ReviewJobDecisionRow',
+    ParentType,
+    ContextType
+  >;
+};
+
 export type GQLMrtJobEnqueueSourceInfoResolvers<
   ContextType = Context,
   ParentType extends GQLResolversParentTypes['MrtJobEnqueueSourceInfo'] =
@@ -11205,7 +11538,11 @@ export type GQLMutateContentItemTypeResponseResolvers<
     GQLResolversParentTypes['MutateContentItemTypeResponse'],
 > = {
   __resolveType: TypeResolveFn<
-    'ItemTypeNameAlreadyExistsError' | 'MutateContentTypeSuccessResponse',
+    | 'InvalidItemTypeHiddenFieldsError'
+    | 'InvalidItemTypeSchemaError'
+    | 'ItemTypeNameAlreadyExistsError'
+    | 'MutateContentTypeSuccessResponse'
+    | 'NotFoundError',
     ParentType,
     ContextType
   >;
@@ -11337,7 +11674,11 @@ export type GQLMutateThreadItemTypeResponseResolvers<
     GQLResolversParentTypes['MutateThreadItemTypeResponse'],
 > = {
   __resolveType: TypeResolveFn<
-    'ItemTypeNameAlreadyExistsError' | 'MutateThreadTypeSuccessResponse',
+    | 'InvalidItemTypeHiddenFieldsError'
+    | 'InvalidItemTypeSchemaError'
+    | 'ItemTypeNameAlreadyExistsError'
+    | 'MutateThreadTypeSuccessResponse'
+    | 'NotFoundError',
     ParentType,
     ContextType
   >;
@@ -11363,7 +11704,11 @@ export type GQLMutateUserItemTypeResponseResolvers<
     GQLResolversParentTypes['MutateUserItemTypeResponse'],
 > = {
   __resolveType: TypeResolveFn<
-    'ItemTypeNameAlreadyExistsError' | 'MutateUserTypeSuccessResponse',
+    | 'InvalidItemTypeHiddenFieldsError'
+    | 'InvalidItemTypeSchemaError'
+    | 'ItemTypeNameAlreadyExistsError'
+    | 'MutateUserTypeSuccessResponse'
+    | 'NotFoundError',
     ParentType,
     ContextType
   >;
@@ -12484,7 +12829,6 @@ export type GQLOrgResolvers<
     ParentType,
     ContextType
   >;
-  isDemoOrg?: Resolver<GQLResolversTypes['Boolean'], ParentType, ContextType>;
   itemTypes?: Resolver<
     ReadonlyArray<GQLResolversTypes['ItemType']>,
     ParentType,
@@ -13210,6 +13554,12 @@ export type GQLQueryResolvers<
     ContextType,
     RequireFields<GQLQueryLocationBankArgs, 'id'>
   >;
+  manualActionItems?: Resolver<
+    GQLResolversTypes['ManualActionItemsPage'],
+    ParentType,
+    ContextType,
+    RequireFields<GQLQueryManualActionItemsArgs, 'input'>
+  >;
   manualReviewQueue?: Resolver<
     Maybe<GQLResolversTypes['ManualReviewQueue']>,
     ParentType,
@@ -13262,6 +13612,12 @@ export type GQLQueryResolvers<
     ParentType,
     ContextType,
     RequireFields<GQLQueryPolicyArgs, 'id'>
+  >;
+  recentModerationActivity?: Resolver<
+    GQLResolversTypes['ModerationActivityPage'],
+    ParentType,
+    ContextType,
+    RequireFields<GQLQueryRecentModerationActivityArgs, 'input'>
   >;
   recentUserStrikeActions?: Resolver<
     ReadonlyArray<GQLResolversTypes['RecentUserStrikeActions']>,
@@ -13771,6 +14127,49 @@ export type GQLRetryNcmecSubmissionResponseResolvers<
 > = {
   error?: Resolver<Maybe<GQLResolversTypes['String']>, ParentType, ContextType>;
   success?: Resolver<GQLResolversTypes['Boolean'], ParentType, ContextType>;
+};
+
+export type GQLReviewJobDecisionRowResolvers<
+  ContextType = Context,
+  ParentType extends GQLResolversParentTypes['ReviewJobDecisionRow'] =
+    GQLResolversParentTypes['ReviewJobDecisionRow'],
+> = {
+  assignedAt?: Resolver<
+    Maybe<GQLResolversTypes['DateTime']>,
+    ParentType,
+    ContextType
+  >;
+  decisionReason?: Resolver<
+    Maybe<GQLResolversTypes['String']>,
+    ParentType,
+    ContextType
+  >;
+  decisions?: Resolver<
+    ReadonlyArray<GQLResolversTypes['ManualReviewDecisionComponent']>,
+    ParentType,
+    ContextType
+  >;
+  id?: Resolver<GQLResolversTypes['ID'], ParentType, ContextType>;
+  itemId?: Resolver<Maybe<GQLResolversTypes['ID']>, ParentType, ContextType>;
+  itemTypeId?: Resolver<
+    Maybe<GQLResolversTypes['ID']>,
+    ParentType,
+    ContextType
+  >;
+  jobCreatedAt?: Resolver<
+    Maybe<GQLResolversTypes['DateTime']>,
+    ParentType,
+    ContextType
+  >;
+  jobId?: Resolver<Maybe<GQLResolversTypes['String']>, ParentType, ContextType>;
+  queueId?: Resolver<Maybe<GQLResolversTypes['ID']>, ParentType, ContextType>;
+  reviewerId?: Resolver<
+    Maybe<GQLResolversTypes['ID']>,
+    ParentType,
+    ContextType
+  >;
+  ts?: Resolver<GQLResolversTypes['DateTime'], ParentType, ContextType>;
+  __isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
 };
 
 export type GQLRoleResolvers<
@@ -15743,6 +16142,8 @@ export type GQLResolvers<ContextType = Context> = {
   IntegrationEmptyInputCredentialsError?: GQLIntegrationEmptyInputCredentialsErrorResolvers<ContextType>;
   IntegrationMetadata?: GQLIntegrationMetadataResolvers<ContextType>;
   IntegrationNoInputCredentialsError?: GQLIntegrationNoInputCredentialsErrorResolvers<ContextType>;
+  InvalidItemTypeHiddenFieldsError?: GQLInvalidItemTypeHiddenFieldsErrorResolvers<ContextType>;
+  InvalidItemTypeSchemaError?: GQLInvalidItemTypeSchemaErrorResolvers<ContextType>;
   InvalidateReportsFromReporterSuccessResponse?: GQLInvalidateReportsFromReporterSuccessResponseResolvers<ContextType>;
   InviteUserToken?: GQLInviteUserTokenResolvers<ContextType>;
   InviteUserTokenExpiredError?: GQLInviteUserTokenExpiredErrorResolvers<ContextType>;
@@ -15783,6 +16184,9 @@ export type GQLResolvers<ContextType = Context> = {
   LoginSsoRequiredError?: GQLLoginSsoRequiredErrorResolvers<ContextType>;
   LoginSuccessResponse?: GQLLoginSuccessResponseResolvers<ContextType>;
   LoginUserDoesNotExistError?: GQLLoginUserDoesNotExistErrorResolvers<ContextType>;
+  ManualActionItem?: GQLManualActionItemResolvers<ContextType>;
+  ManualActionItemsPage?: GQLManualActionItemsPageResolvers<ContextType>;
+  ManualActionRow?: GQLManualActionRowResolvers<ContextType>;
   ManualReviewChartSettings?: GQLManualReviewChartSettingsResolvers<ContextType>;
   ManualReviewDecision?: GQLManualReviewDecisionResolvers<ContextType>;
   ManualReviewDecisionComponent?: GQLManualReviewDecisionComponentResolvers<ContextType>;
@@ -15805,6 +16209,8 @@ export type GQLResolvers<ContextType = Context> = {
   ModelCardField?: GQLModelCardFieldResolvers<ContextType>;
   ModelCardSection?: GQLModelCardSectionResolvers<ContextType>;
   ModelCardSubsection?: GQLModelCardSubsectionResolvers<ContextType>;
+  ModerationActivityPage?: GQLModerationActivityPageResolvers<ContextType>;
+  ModerationActivityRow?: GQLModerationActivityRowResolvers<ContextType>;
   MrtJobEnqueueSourceInfo?: GQLMrtJobEnqueueSourceInfoResolvers<ContextType>;
   MutateAccessibleQueuesForUserSuccessResponse?: GQLMutateAccessibleQueuesForUserSuccessResponseResolvers<ContextType>;
   MutateActionResponse?: GQLMutateActionResponseResolvers<ContextType>;
@@ -15883,6 +16289,7 @@ export type GQLResolvers<ContextType = Context> = {
   ReportingRulePassRateData?: GQLReportingRulePassRateDataResolvers<ContextType>;
   ResolvedJobCount?: GQLResolvedJobCountResolvers<ContextType>;
   RetryNcmecSubmissionResponse?: GQLRetryNcmecSubmissionResponseResolvers<ContextType>;
+  ReviewJobDecisionRow?: GQLReviewJobDecisionRowResolvers<ContextType>;
   Role?: GQLRoleResolvers<ContextType>;
   RotateApiKeyError?: GQLRotateApiKeyErrorResolvers<ContextType>;
   RotateApiKeyResponse?: GQLRotateApiKeyResponseResolvers<ContextType>;

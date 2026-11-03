@@ -95,7 +95,6 @@ const typeDefs = /* GraphQL */ `
     defaultInterfacePreferences: UserInterfacePreferences!
     userStrikeThresholds: [UserStrikeThreshold!]!
     userStrikeTTL: Int!
-    isDemoOrg: Boolean!
     samlEnabled: Boolean!
     ssoUrl: String
     ssoCert: String
@@ -827,9 +826,6 @@ const Org: GQLOrgResolvers = {
       // leaving this empty for now.
       mrtChartConfigurations: [],
     };
-  },
-  async isDemoOrg(org, _, context) {
-    return context.services.OrgSettingsService.isDemoOrg(org.id);
   },
   async samlEnabled(org, _, context) {
     const user = context.getUser();
