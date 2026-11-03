@@ -31,6 +31,7 @@ gql`
           name
           description
           enabled_ratio
+          isAvailable
         }
       }
     }

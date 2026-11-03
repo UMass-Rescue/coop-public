@@ -86,6 +86,12 @@ const imageMatchingSettingsMock: MockedResponse = {
         __typename: 'Org',
         id: 'org-1',
         hasClipHashingEnabled: false,
+        clipRuleImpact: {
+          __typename: 'ClipRuleImpact',
+          activeRules: [],
+          routingRules: [],
+          draftRules: [],
+        },
         clipHashingAvailable: true,
       },
     },

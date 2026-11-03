@@ -25,6 +25,9 @@ import {
 } from '../../../../graphql/generated';
 import { hashBankInstanceLabel } from './HashBankInstanceSelect';
 
+const UNAVAILABLE_BANK_ACTION_HINT =
+  'CLIP is turned off for your organization. Turn it on under Settings, Image Matching to change this bank.';
+
 const getStatusColor = (enabled_ratio: number) => {
   if (enabled_ratio === 0) return 'red';
   if (enabled_ratio < 1) return 'orange';
@@ -80,12 +83,15 @@ export default function HashBanksDashboard() {
   }, []);
 
   const mutations = useCallback(
-    (id: string) => {
+    (id: string, isAvailable: boolean) => {
       return (
         <RowMutations
           onEdit={(event: MouseEvent) => editBank(id, event)}
           onDelete={(event: MouseEvent) => showModal(id, event)}
-          canDelete={true}
+          canEdit={isAvailable}
+          editDisabledTooltipTitle={UNAVAILABLE_BANK_ACTION_HINT}
+          canDelete={isAvailable}
+          deleteDisabledTooltipTitle={UNAVAILABLE_BANK_ACTION_HINT}
         />
       );
     },
@@ -156,6 +162,7 @@ export default function HashBanksDashboard() {
         description: bank.description,
         enabled_ratio: bank.enabled_ratio,
         hma_instance: bank.hma_instance,
+        isAvailable: bank.isAvailable,
         id: bank.id,
       })),
     [banks],
@@ -165,9 +172,15 @@ export default function HashBanksDashboard() {
     () =>
       dataValues?.map((values) => {
         return {
-          mutations: mutations(values.id),
+          mutations: mutations(values.id, values.isAvailable),
           name: values.name,
-          description: <div className="italic">{values.description}</div>,
+          description: (
+            <div
+              className={values.isAvailable ? 'italic' : 'italic text-gray-500'}
+            >
+              {values.description}
+            </div>
+          ),
           hma_instance: (
             <Tag
               color={
@@ -179,10 +192,12 @@ export default function HashBanksDashboard() {
               {hashBankInstanceLabel(values.hma_instance)}
             </Tag>
           ),
-          enabled_ratio: (
+          enabled_ratio: values.isAvailable ? (
             <Tag color={getStatusColor(values.enabled_ratio)}>
               {getStatusText(values.enabled_ratio)}
             </Tag>
+          ) : (
+            <Tag>Unavailable, CLIP is off</Tag>
           ),
           values,
         };

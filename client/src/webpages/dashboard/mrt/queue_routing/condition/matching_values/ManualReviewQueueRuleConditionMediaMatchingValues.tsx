@@ -35,7 +35,7 @@ export default function ManualReviewQueueRuleConditionMediaMatchingValues(props:
   // CLIP banks only work with the CLIP signal, and the rest with the others.
   const bankInstance = hashBankInstanceForSignal(condition.signal);
   const hashBanks = allHashBanks.filter(
-    (bank) => bank.hma_instance === bankInstance,
+    (bank) => bank.hma_instance === bankInstance && bank.isAvailable,
   );
   const selectedImageBankIds = condition.matchingValues?.imageBankIds;
   const unavailable = unavailableBanks(

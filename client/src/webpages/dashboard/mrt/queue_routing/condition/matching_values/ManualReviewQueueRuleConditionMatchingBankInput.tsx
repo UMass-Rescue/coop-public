@@ -10,6 +10,10 @@ import {
 import { receivesRegexInput } from '../../../../../../models/signal';
 import { titleCaseEnumString } from '../../../../../../utils/string';
 import { bankTypeName } from '../../../../banks/text/TextBankForm';
+import {
+  UNAVAILABLE_BANK_HINT,
+  unavailableBanks,
+} from '../../../../rules/imageBankInstance';
 import { MatchingBankType } from '../../../../rules/rule_form/condition/matching_values/RuleFormConditionMatchingBankInput';
 import {
   ConditionLocation,
@@ -53,6 +57,12 @@ export default function ManualReviewQueueRuleConditionMatchingBankInput<
     locationBanks ?? [],
     hashBanks ?? [],
   ].flat();
+  // A hash bank that cannot be used right now (CLIP is off) is not offered.
+  // One already picked stays selected, labelled as unavailable.
+  const offeredBanks = allBanks.filter(
+    (bank) => bank.__typename !== 'HashBank' || bank.isAvailable,
+  );
+  const unavailable = unavailableBanks(bankIds, offeredBanks, allBanks);
 
   if (loading) {
     return <ComponentLoading />;
@@ -85,7 +95,7 @@ export default function ManualReviewQueueRuleConditionMatchingBankInput<
           filterOption={selectFilterByLabelOption}
           dropdownMatchSelectWidth={false}
         >
-          {allBanks?.map((bank, index) => {
+          {offeredBanks.map((bank, index) => {
             const bankIsTextBank = bank.__typename === 'TextBank';
             const isRegexTextBank =
               bankIsTextBank && bank.type === GQLTextBankType.Regex;
@@ -111,10 +121,24 @@ export default function ManualReviewQueueRuleConditionMatchingBankInput<
               </Option>
             );
           })}
+          {unavailable.map((bank) => (
+            <Option
+              key={bank.id}
+              value={bank.id}
+              label={bank.name}
+              title={UNAVAILABLE_BANK_HINT}
+            >
+              {bank.name}
+            </Option>
+          ))}
         </Select>
       ) : (
         <ManualReviewQueueRoutingStaticTokenField
-          tokens={bankIds.map((it) => allBanks.find((i) => i.id === it)!.name)}
+          tokens={bankIds.map(
+            (it) =>
+              [...offeredBanks, ...unavailable].find((i) => i.id === it)
+                ?.name ?? it,
+          )}
         />
       )}
       <div

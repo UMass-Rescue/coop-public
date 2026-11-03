@@ -41,6 +41,7 @@ const bank = (
   id: string,
   name: string,
   hma_instance: GQLHashBankHmaInstance,
+  isAvailable = true,
 ) => ({
   __typename: 'HashBank',
   id,
@@ -50,12 +51,15 @@ const bank = (
   enabled_ratio: 1,
   hma_instance,
   org_id: 'org',
+  isAvailable,
 });
 
 const BANKS = [
   bank('1', 'Standard Bank', GQLHashBankHmaInstance.Default),
   bank('2', 'Other Standard Bank', GQLHashBankHmaInstance.Default),
   bank('3', 'Clip Bank', GQLHashBankHmaInstance.Clip),
+  // A CLIP bank while CLIP is off for the org.
+  bank('4', 'Off Clip Bank', GQLHashBankHmaInstance.Clip, false),
 ];
 
 function renderPicker(condition: RuleFormLeafCondition) {
@@ -173,5 +177,22 @@ describe('RuleFormConditionMediaMatchingValues', () => {
     });
     await openPicker();
     expect(optionNames()).toEqual(['Clip Bank']);
+  });
+
+  it('shows a picked bank that CLIP being off made unavailable by its name, and never offers it', async () => {
+    renderPicker({
+      signal: makeSignal(GQLSignalType.ImageClipMatch),
+      matchingValues: { imageBankIds: ['3', '4'] },
+    });
+
+    expect(await screen.findByText('Clip Bank')).toBeInTheDocument();
+    expect(screen.getByText('Off Clip Bank (unavailable)')).toBeInTheDocument();
+
+    await openPicker();
+    // Only the available bank is a choice. The unavailable one is listed
+    // only because it is already picked.
+    expect(
+      optionNames().filter((name) => name?.startsWith('Off Clip Bank')),
+    ).toHaveLength(0);
   });
 });

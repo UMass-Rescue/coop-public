@@ -40,6 +40,7 @@ const bank = (
   id: string,
   name: string,
   hma_instance: GQLHashBankHmaInstance,
+  isAvailable = true,
 ) => ({
   __typename: 'HashBank',
   id,
@@ -49,12 +50,15 @@ const bank = (
   enabled_ratio: 1,
   hma_instance,
   org_id: 'org',
+  isAvailable,
 });
 
 const BANKS = [
   bank('1', 'Standard Bank', GQLHashBankHmaInstance.Default),
   bank('2', 'Other Standard Bank', GQLHashBankHmaInstance.Default),
   bank('3', 'Clip Bank', GQLHashBankHmaInstance.Clip),
+  // A CLIP bank while CLIP is off for the org.
+  bank('4', 'Off Clip Bank', GQLHashBankHmaInstance.Clip, false),
 ];
 
 function renderPicker(condition: RuleFormLeafCondition, editing = true) {
@@ -153,5 +157,19 @@ describe('ManualReviewQueueRuleConditionMediaMatchingValues', () => {
     expect(screen.getByText('Unavailable bank')).toBeInTheDocument();
     expect(screen.queryByText('99')).not.toBeInTheDocument();
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+  });
+
+  it('shows the picked bank that CLIP being off made unavailable by its name', async () => {
+    renderPicker(
+      {
+        signal: makeSignal(GQLSignalType.ImageClipMatch),
+        matchingValues: { imageBankIds: ['4'] },
+      },
+      false,
+    );
+
+    expect(
+      await screen.findByText('Off Clip Bank (unavailable)'),
+    ).toBeInTheDocument();
   });
 });

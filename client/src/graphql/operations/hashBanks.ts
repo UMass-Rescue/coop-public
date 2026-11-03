@@ -10,6 +10,7 @@ export const HASH_BANKS_QUERY = gql`
       enabled_ratio
       hma_instance
       org_id
+      isAvailable
     }
   }
 `;

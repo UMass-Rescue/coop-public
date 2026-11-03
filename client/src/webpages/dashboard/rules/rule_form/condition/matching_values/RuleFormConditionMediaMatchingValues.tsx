@@ -37,7 +37,7 @@ export default function RuleFormConditionMediaMatchingValues(props: {
   const bankInstance = hashBankInstanceForSignal(condition.signal);
   const allHashBanks = data?.hashBanks ?? [];
   const hashBanks = allHashBanks.filter(
-    (bank) => bank.hma_instance === bankInstance,
+    (bank) => bank.hma_instance === bankInstance && bank.isAvailable,
   );
   const selectedImageBankIds = condition.matchingValues?.imageBankIds;
   const unavailable = unavailableBanks(

@@ -422,6 +422,31 @@ export type GQLChangePasswordSuccessResponse = {
   readonly _?: Maybe<Scalars['Boolean']['output']>;
 };
 
+export type GQLClipRule = {
+  readonly __typename: 'ClipRule';
+  readonly id: Scalars['ID']['output'];
+  readonly kind: GQLClipRuleKind;
+  readonly name: Scalars['String']['output'];
+};
+
+export type GQLClipRuleImpact = {
+  readonly __typename: 'ClipRuleImpact';
+  /** Live or Background rules. Turning CLIP off moves them to Draft. */
+  readonly activeRules: ReadonlyArray<GQLClipRule>;
+  /** Draft rules that use CLIP. They stay in Draft until turned on by hand. */
+  readonly draftRules: ReadonlyArray<GQLClipRule>;
+  /** Routing rules have no Draft state: while CLIP is off they stop matching. */
+  readonly routingRules: ReadonlyArray<GQLClipRule>;
+};
+
+export const GQLClipRuleKind = {
+  Proactive: 'PROACTIVE',
+  Reporting: 'REPORTING',
+  Routing: 'ROUTING',
+} as const;
+
+export type GQLClipRuleKind =
+  (typeof GQLClipRuleKind)[keyof typeof GQLClipRuleKind];
 export type GQLCondition = GQLConditionSet | GQLLeafCondition;
 
 export const GQLConditionConjunction = {
@@ -1417,6 +1442,8 @@ export type GQLHashBank = {
   readonly hma_instance: GQLHashBankHmaInstance;
   readonly hma_name: Scalars['String']['output'];
   readonly id: Scalars['ID']['output'];
+  /** False while the bank cannot be used, for example a CLIP bank while CLIP is off for the org. */
+  readonly isAvailable: Scalars['Boolean']['output'];
   readonly name: Scalars['String']['output'];
   readonly org_id: Scalars['String']['output'];
 };
@@ -3363,6 +3390,11 @@ export type GQLOrg = {
   readonly banks?: Maybe<GQLMatchingBanks>;
   /** Whether this deployment has the optional CLIP instance, so the setting can be turned on. */
   readonly clipHashingAvailable: Scalars['Boolean']['output'];
+  /**
+   * The rules that use CLIP, so the settings page can say what turning CLIP off
+   * will change. Requires MANAGE_ORG.
+   */
+  readonly clipRuleImpact: GQLClipRuleImpact;
   readonly contentTypes: ReadonlyArray<GQLContentType>;
   readonly defaultInterfacePreferences: GQLUserInterfacePreferences;
   readonly email: Scalars['String']['output'];
@@ -5524,6 +5556,7 @@ export type GQLHashBanksQuery = {
     readonly enabled_ratio: number;
     readonly hma_instance: GQLHashBankHmaInstance;
     readonly org_id: string;
+    readonly isAvailable: boolean;
   }>;
 };
 
@@ -6644,6 +6677,7 @@ export type GQLMatchingBankIdsQuery = {
         readonly name: string;
         readonly description?: string | null;
         readonly enabled_ratio: number;
+        readonly isAvailable: boolean;
       }>;
     } | null;
   } | null;
@@ -25577,6 +25611,27 @@ export type GQLImageMatchingSettingsQuery = {
     readonly __typename: 'Org';
     readonly id: string;
     readonly hasClipHashingEnabled: boolean;
+    readonly clipRuleImpact: {
+      readonly __typename: 'ClipRuleImpact';
+      readonly activeRules: ReadonlyArray<{
+        readonly __typename: 'ClipRule';
+        readonly id: string;
+        readonly name: string;
+        readonly kind: GQLClipRuleKind;
+      }>;
+      readonly routingRules: ReadonlyArray<{
+        readonly __typename: 'ClipRule';
+        readonly id: string;
+        readonly name: string;
+        readonly kind: GQLClipRuleKind;
+      }>;
+      readonly draftRules: ReadonlyArray<{
+        readonly __typename: 'ClipRule';
+        readonly id: string;
+        readonly name: string;
+        readonly kind: GQLClipRuleKind;
+      }>;
+    };
   } | null;
 };
 
@@ -26945,6 +27000,7 @@ export const GQLHashBanksDocument = gql`
       enabled_ratio
       hma_instance
       org_id
+      isAvailable
     }
   }
 `;
@@ -30533,6 +30589,7 @@ export const GQLMatchingBankIdsDocument = gql`
           name
           description
           enabled_ratio
+          isAvailable
         }
       }
     }
@@ -45912,6 +45969,23 @@ export const GQLImageMatchingSettingsDocument = gql`
     myOrg {
       id
       hasClipHashingEnabled
+      clipRuleImpact {
+        activeRules {
+          id
+          name
+          kind
+        }
+        routingRules {
+          id
+          name
+          kind
+        }
+        draftRules {
+          id
+          name
+          kind
+        }
+      }
     }
   }
 `;
