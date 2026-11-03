@@ -23,7 +23,12 @@ const toastMocks = vi.hoisted(() => ({
 }));
 vi.mock('@/coop-ui/Toast', () => ({ toast: toastMocks }));
 
-type RuleRef = { id: string; name: string; kind: string };
+type RuleRef = {
+  __typename: 'ClipRule';
+  id: string;
+  name: string;
+  kind: string;
+};
 const ref = (id: string, name: string, kind: string): RuleRef => ({
   __typename: 'ClipRule',
   id,

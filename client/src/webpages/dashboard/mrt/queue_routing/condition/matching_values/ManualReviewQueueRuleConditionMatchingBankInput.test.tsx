@@ -4,6 +4,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
 
+import { MatchingBankType } from '../../../../rules/rule_form/condition/matching_values/RuleFormConditionMatchingBankInput';
 import { type RuleFormLeafCondition } from '../../../../rules/types';
 import ManualReviewQueueRuleConditionMatchingBankInput from './ManualReviewQueueRuleConditionMatchingBankInput';
 
@@ -56,7 +57,7 @@ function renderInput(condition: RuleFormLeafCondition, editing = true) {
         location={{ conditionIndex: 0, conditionSetIndex: 0 }}
         editing={editing}
         setShowBankDropdown={vi.fn()}
-        bankType="TEXT"
+        bankType={MatchingBankType.TEXT}
         onUpdateSelectedBankIds={vi.fn()}
       />
     </MockedProvider>,
