@@ -74,7 +74,7 @@ Deploying CLIP does not change anything for an organization until an admin turns
 - adds a **Semantic (CLIP)** option when creating hash banks;
 - makes Coop compute a CLIP embedding for each image submitted by the organization.
 
-Turning it off hides the organization's CLIP banks and stops computing embeddings. Nothing is deleted, and turning it back on restores the banks. A hidden bank still holds its name, so a new bank cannot reuse it.
+Turning it off asks for confirmation first, listing what will change (see [Turning CLIP off](#turning-clip-off)). Nothing is deleted.
 
 ## How images are hashed
 
@@ -113,8 +113,21 @@ Once CLIP is on for your organization, rules and routing rules can use the **Ima
 Things to know:
 
 - Only images submitted while CLIP was on for the organization have a CLIP embedding. Older images, and images that failed to hash, cannot be scored, so such a condition does not match them.
-- Turning CLIP off stops new images from being hashed and hides the organization's CLIP banks. Rules using the signal cannot load their banks, so they report an error for each item they evaluate until CLIP is turned back on or the rule is changed. The rules and banks are kept, and the rule editor lists the missing banks as "Unavailable bank" so the selection is not lost when the rule is saved.
+- Turning CLIP off moves the rules that use the signal to Draft (see below).
 - Matching a signal that has no embedding or no CLIP banks is an expected outcome, not an error, and is not counted as a failure.
+
+## Turning CLIP off
+
+An admin turns CLIP off under **Settings** → **Image Matching**. Coop first shows a confirmation that lists what will change, and nothing happens until it is confirmed.
+
+- **Rules that use the CLIP signal are moved to Draft.** This covers Live and Background rules, and reporting rules, including a rule where CLIP is only one of several conditions. A rule that cannot run is better visibly in Draft than Live and failing on every item. Archived and Deprecated rules are not touched.
+- **Manual review routing rules are not changed.** They have no Draft state, so they stay as they are. The CLIP condition in them cannot match while CLIP is off, so such a rule matches only through its other conditions (if it has any); otherwise the job goes on to the next routing rule or the default queue. The confirmation lists them.
+- **CLIP banks stay, shown as unavailable.** On the Matching Banks page they are greyed out, tagged "Unavailable, CLIP is off", and cannot be edited or deleted. In a rule that already uses one, the rule editor shows its name as "(unavailable)" and keeps it selected, but it cannot be chosen for a new condition. Nothing is deleted, and a bank still holds its name, so a new bank cannot reuse it.
+- **New images are no longer hashed with CLIP.**
+
+Turning CLIP back on makes the banks available again. **Rules moved to Draft stay in Draft**: turn them back on from the rule page. The Image Matching tab lists the Draft rules that use CLIP while CLIP is on. It cannot tell a rule Coop moved from one someone drafted on purpose, so check each one.
+
+Rules are cached for a few seconds, so a rule that was Live when CLIP was turned off can keep running for about half a minute. During that time it reports an error for each item, as it would before.
 
 ## Check that it works
 

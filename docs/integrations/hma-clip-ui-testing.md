@@ -103,7 +103,11 @@ If nothing arrives after a minute, see "If it does not work" below.
 ## Other things worth checking
 
 - **Banks are kept apart.** In the rule editor, change the condition's signal to a PDQ image signal: the bank list switches to standard banks, and the CLIP bank you picked is cleared. Switch back and pick it again.
-- **The signal needs CLIP.** Turn CLIP off under Image Matching. The CLIP signal shows as disabled with a message pointing back to the setting, and the CLIP bank is hidden from the bank list. Open the rule: the bank shows as "Unavailable bank" and stays selected. Turn CLIP back on and everything returns.
+- **Turning CLIP off asks first.** Turn CLIP off under Image Matching and press Save Changes. A confirmation lists the rules that will move to Draft (your `CLIP UI test rule`) and any routing rules that will stop matching. Cancel puts the switch back and changes nothing. Confirm, and then:
+  - The rule is in Draft (Automated Enforcement, Proactive Rules).
+  - On Matching Banks, `CLIP UI test` is greyed out, tagged "Unavailable, CLIP is off", and its edit and delete buttons are disabled.
+  - In the rule editor the CLIP signal shows as disabled, and the rule's bank reads "CLIP UI test (unavailable)" and stays selected.
+- **Turning it back on.** The bank is available again. The rule stays in Draft: Image Matching lists it under "Rules that use CLIP are in Draft", and you turn it back on from the rule page.
 - **Only the CLIP deployment has it.** On a deployment without a CLIP instance, the Image Matching tab, the CLIP bank choice and the CLIP signal are all absent.
 
 ## If it does not work
@@ -111,7 +115,7 @@ If nothing arrives after a minute, see "If it does not work" below.
 - **Nothing arrives in the queue.** Check that the organization has a review queue and that you are a reviewer on it (step 6), that CLIP is on, the rule is Live and uses a threshold at or below the 0.985 the resized image scores, and that the bank was seeded (step 3 printed `1 added`). HMA needs up to 3 minutes after seeding before it can match. A lookup before then finds nothing.
 - **The images were never fetched, or the queue shows only items without a CLIP match.** An item whose image could not be fetched is still processed, but it has no CLIP embedding, so the rule cannot match it. The file server's log shows whether each image was requested and with what status (`404` means wrong directory, no request at all means the HMA containers cannot reach your image host). Fix the host, then submit again with a new `RUN` number.
 - **The review console says "Image failed to load".** Your browser cannot load the image URL. See "Pick an image host" in step 7. This does not affect matching.
-- **A rule error appears in the server log while CLIP is off.** Expected: a rule that uses the CLIP signal cannot load its banks while CLIP is off, so it reports an error for each item until CLIP is turned back on.
+- **A rule error appears in the server log just after CLIP is turned off.** Expected for up to about half a minute: rules are cached, so a rule moved to Draft can still run briefly, and it cannot load its banks. It stops once the cache refreshes.
 
 ## Clean up
 
