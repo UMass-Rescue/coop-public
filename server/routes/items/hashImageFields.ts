@@ -247,25 +247,22 @@ export async function addHashesToImageFields({
     const matchBanks = async (
       banks: typeof allBanks,
       hashes: Record<string, string>,
-      run?: ClipHasher['run'],
+      run: ClipHasher['run'] = async (call) => call(),
     ) => {
       const bankNames = banks.map((bank) => bank.hma_name);
       if (Object.keys(hashes).length === 0 || bankNames.length === 0) {
         return [];
       }
       try {
-        const lookUp = async (signalType: string, hash: string) => {
-          const check = async () =>
-            HMAHashBankService.checkImageMatchWithDetails(
-              bankNames,
-              signalType,
-              hash,
-            );
-          return run ? run(check) : check();
-        };
         const matchResults = await Promise.all(
           Object.entries(hashes).map(async ([signalType, hash]) =>
-            lookUp(signalType, hash),
+            run(async () =>
+              HMAHashBankService.checkImageMatchWithDetails(
+                bankNames,
+                signalType,
+                hash,
+              ),
+            ),
           ),
         );
 
@@ -304,6 +301,12 @@ export async function addHashesToImageFields({
     };
 
     const hashImage = async (image: ImageValue) => {
+      // Preserve any fields the coercion step already populated on the media
+      // object, rather than rebuilding a fresh object that drops them. The
+      // client controls those, so `embeddings` is never taken from them.
+      const clientFields: Record<string, unknown> =
+        typeof image === 'string' ? {} : image;
+      const { embeddings: _clientEmbeddings, ...coercedFields } = clientFields;
       // MEDIA fields can also hold video/audio, which we return unchanged.
       // A null mediaType means the kind couldn't be inferred from the URL's
       // extension, so we hash it and let HMA detect the content type.
@@ -313,16 +316,9 @@ export async function addHashesToImageFields({
         image.mediaType != null &&
         image.mediaType !== ScalarTypes.IMAGE
       ) {
-        const { embeddings: _clientEmbeddings, ...rest } = image;
-        return rest;
+        return coercedFields;
       }
       const url = typeof image === 'string' ? image : image.url;
-      // Preserve any fields the coercion step already populated on the media
-      // object, rather than rebuilding a fresh object that drops them. The
-      // client controls those, so `embeddings` is never taken from them.
-      const clientFields: Record<string, unknown> =
-        typeof image === 'string' ? {} : image;
-      const { embeddings: _clientEmbeddings, ...coercedFields } = clientFields;
       if (typeof url !== 'string' || !url) {
         return null;
       }

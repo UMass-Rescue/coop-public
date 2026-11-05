@@ -562,46 +562,38 @@ const Org: GQLOrgResolvers = {
       ManualReviewToolService,
     } = context.services;
     const signalType = SignalType.IMAGE_CLIP_MATCH;
-    const [proactive, reporting, routing, draftProactive, draftReporting] =
-      await Promise.all([
-        ModerationConfigService.ruleSignals().getRulesUsingSignal({
-          orgId: org.id,
-          signalType,
-          statuses: ['LIVE', 'BACKGROUND'],
-        }),
-        ReportingService.getReportingRulesUsingSignal({
-          orgId: org.id,
-          signalType,
-          statuses: ['LIVE', 'BACKGROUND'],
-        }),
-        ManualReviewToolService.getRoutingRulesUsingSignal({
-          orgId: org.id,
-          signalType,
-        }),
-        ModerationConfigService.ruleSignals().getRulesUsingSignal({
-          orgId: org.id,
-          signalType,
-          statuses: ['DRAFT'],
-        }),
-        ReportingService.getReportingRulesUsingSignal({
-          orgId: org.id,
-          signalType,
-          statuses: ['DRAFT'],
-        }),
-      ]);
+    const statuses = ['LIVE', 'BACKGROUND', 'DRAFT'] as const;
+    const [proactive, reporting, routing] = await Promise.all([
+      ModerationConfigService.ruleSignals().getRulesUsingSignal({
+        orgId: org.id,
+        signalType,
+        statuses,
+      }),
+      ReportingService.getReportingRulesUsingSignal({
+        orgId: org.id,
+        signalType,
+        statuses,
+      }),
+      ManualReviewToolService.getRoutingRulesUsingSignal({
+        orgId: org.id,
+        signalType,
+      }),
+    ]);
     const asRules = (
       rules: readonly { id: string; name: string }[],
       kind: 'PROACTIVE' | 'REPORTING' | 'ROUTING',
     ) => rules.map(({ id, name }) => ({ id, name, kind }) as const);
+    const isDraft = ({ status }: { status: string }) => status === 'DRAFT';
+    const isActive = (rule: { status: string }) => !isDraft(rule);
     return {
       activeRules: [
-        ...asRules(proactive, 'PROACTIVE'),
-        ...asRules(reporting, 'REPORTING'),
+        ...asRules(proactive.filter(isActive), 'PROACTIVE'),
+        ...asRules(reporting.filter(isActive), 'REPORTING'),
       ],
       routingRules: asRules(routing, 'ROUTING'),
       draftRules: [
-        ...asRules(draftProactive, 'PROACTIVE'),
-        ...asRules(draftReporting, 'REPORTING'),
+        ...asRules(proactive.filter(isDraft), 'PROACTIVE'),
+        ...asRules(reporting.filter(isDraft), 'REPORTING'),
       ],
     };
   },
@@ -1126,16 +1118,14 @@ const Mutation: GQLMutationResolvers = {
       // ones out of service first. Both steps are safe to repeat, and doing the
       // rules first means a failure leaves CLIP on rather than rules erroring.
       const { ModerationConfigService, ReportingService } = context.services;
-      await ModerationConfigService.ruleSignals().moveActiveRulesUsingSignalToDraft(
-        {
-          orgId: user.orgId,
-          signalType: SignalType.IMAGE_CLIP_MATCH,
-        },
-      );
-      await ReportingService.moveActiveReportingRulesUsingSignalToDraft({
+      const args = {
         orgId: user.orgId,
         signalType: SignalType.IMAGE_CLIP_MATCH,
-      });
+      };
+      await ModerationConfigService.ruleSignals().moveActiveRulesUsingSignalToDraft(
+        args,
+      );
+      await ReportingService.moveActiveReportingRulesUsingSignalToDraft(args);
     }
     await context.services.OrgSettingsService.updateHasClipHashingEnabled({
       orgId: user.orgId,

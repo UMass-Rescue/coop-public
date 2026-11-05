@@ -530,18 +530,14 @@ describe('turning CLIP off', () => {
     const updateHasClipHashingEnabled = vi.fn(async () => undefined);
     const moveProactive = vi.fn(async () => []);
     const moveReporting = vi.fn(async () => []);
-    const getRulesUsingSignal = vi.fn(
-      async (args: { statuses: readonly string[] }) =>
-        args.statuses.includes('DRAFT')
-          ? [{ id: 'p-draft', name: 'Drafted proactive' }]
-          : [{ id: 'p-live', name: 'Live proactive' }],
-    );
-    const getReportingRulesUsingSignal = vi.fn(
-      async (args: { statuses: readonly string[] }) =>
-        args.statuses.includes('DRAFT')
-          ? [{ id: 'r-draft', name: 'Drafted reporting' }]
-          : [{ id: 'r-live', name: 'Live reporting' }],
-    );
+    const getRulesUsingSignal = vi.fn(async (_args: unknown) => [
+      { id: 'p-live', name: 'Live proactive', status: 'LIVE' },
+      { id: 'p-draft', name: 'Drafted proactive', status: 'DRAFT' },
+    ]);
+    const getReportingRulesUsingSignal = vi.fn(async (_args: unknown) => [
+      { id: 'r-live', name: 'Live reporting', status: 'BACKGROUND' },
+      { id: 'r-draft', name: 'Drafted reporting', status: 'DRAFT' },
+    ]);
     const getRoutingRulesUsingSignal = vi.fn(async () => [
       { id: 'route-1', name: 'Route images' },
     ]);
@@ -680,8 +676,9 @@ describe('turning CLIP off', () => {
       expect(getRulesUsingSignal).toHaveBeenCalledWith({
         orgId: 'org-1',
         signalType: CLIP,
-        statuses: ['LIVE', 'BACKGROUND'],
+        statuses: ['LIVE', 'BACKGROUND', 'DRAFT'],
       });
+      expect(getRulesUsingSignal).toHaveBeenCalledTimes(1);
       expect(getRoutingRulesUsingSignal).toHaveBeenCalledWith({
         orgId: 'org-1',
         signalType: CLIP,
