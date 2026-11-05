@@ -4,6 +4,7 @@ import type { Dependencies } from '../../../iocContainer/index.js';
 import { jsonStringify } from '../../../utils/encoding.js';
 import { makeSignalPermanentError } from '../../../utils/errors.js';
 import type { HashBank } from '../../hmaService/dbTypes.js';
+import { isClipEmbedding } from '../../hmaService/index.js';
 import { SignalPricingStructure as SignalPricingStructureType } from '../types/SignalPricingStructure.js';
 import { SignalType } from '../types/SignalType.js';
 import SignalBase, {
@@ -136,7 +137,7 @@ export default class ImageClipMatchSignal extends SignalBase<
       });
     }
     const embedding = (value.value as ImageValue).embeddings?.clip_float;
-    if (!embedding) {
+    if (!isClipEmbedding(embedding)) {
       throw makeSignalPermanentError('This image has no CLIP embedding', {
         detail:
           'Embeddings are only created for images submitted while CLIP is ' +

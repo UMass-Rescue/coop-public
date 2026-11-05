@@ -3,7 +3,11 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { listImageFiles, seedClipBank } from './seedClipBankLib.js';
+import {
+  listImageFiles,
+  MAX_IMAGE_BYTES,
+  seedClipBank,
+} from './seedClipBankLib.js';
 
 type Service = Parameters<typeof seedClipBank>[0]['hmaService'];
 
@@ -57,6 +61,23 @@ describe('listImageFiles', () => {
 });
 
 describe('seedClipBank', () => {
+  it('skips a file over the size limit and carries on with the rest', async () => {
+    const dir = await makeDir({ 'ok.jpg': 'small' });
+    await writeFile(
+      path.join(dir, 'huge.png'),
+      Buffer.alloc(MAX_IMAGE_BYTES + 1),
+    );
+    const { service, addContentToBank } = makeService();
+
+    const result = await seed(service, dir);
+
+    expect(result.added).toEqual(['ok.jpg']);
+    expect(result.failed).toEqual([
+      { file: 'huge.png', error: expect.stringContaining('over the') },
+    ]);
+    expect(addContentToBank).toHaveBeenCalledTimes(1);
+  });
+
   it('adds each image to the CLIP instance with a content hash and file name', async () => {
     const dir = await makeDir({ 'a.jpg': 'first', 'b.png': 'second' });
     const { service, addContentToBank } = makeService();

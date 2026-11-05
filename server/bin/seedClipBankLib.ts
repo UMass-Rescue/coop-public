@@ -7,10 +7,13 @@
  * without the IoC container; not intended for general reuse.
  */
 import { createHash } from 'node:crypto';
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 import { type HmaService } from '../services/hmaService/index.js';
+
+/** Larger files are skipped, so one stray file cannot exhaust memory. */
+export const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 
 const IMAGE_TYPES: Readonly<Record<string, string>> = {
   '.jpg': 'image/jpeg',
@@ -86,7 +89,14 @@ export async function seedClipBank(args: {
       continue;
     }
     try {
-      const bytes = await readFile(path.join(dir, name));
+      const filePath = path.join(dir, name);
+      const { size } = await stat(filePath);
+      if (size > MAX_IMAGE_BYTES) {
+        throw new Error(
+          `file is ${size} bytes, over the ${MAX_IMAGE_BYTES} byte limit`,
+        );
+      }
+      const bytes = await readFile(filePath);
       const content = await hmaService.addContentToBank(bank.hma_name, {
         instance: bank.hma_instance,
         file: new File([bytes], name, {

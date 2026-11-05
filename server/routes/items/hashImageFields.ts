@@ -1,4 +1,5 @@
 import { getScalarType, ScalarTypes } from '@roostorg/coop-types';
+import _ from 'lodash';
 
 import { type Dependencies } from '../../iocContainer/index.js';
 import { HmaRequestError } from '../../services/hmaService/index.js';
@@ -222,6 +223,10 @@ export async function addHashesToImageFields({
    */
   listBanks?: () => ReturnType<HashService['listBanks']>;
 }) {
+  // Only our own CLIP hashing may set embeddings, so drop any the client sent
+  // up front, whether or not hashing goes on to succeed.
+  removeClientEmbeddings(itemType, data);
+
   const imageFields = itemType.schema.filter(
     (field) =>
       isHashableScalarType(getScalarType(field)) &&
@@ -302,11 +307,9 @@ export async function addHashesToImageFields({
 
     const hashImage = async (image: ImageValue) => {
       // Preserve any fields the coercion step already populated on the media
-      // object, rather than rebuilding a fresh object that drops them. The
-      // client controls those, so `embeddings` is never taken from them.
-      const clientFields: Record<string, unknown> =
+      // object, rather than rebuilding a fresh object that drops them.
+      const coercedFields: Record<string, unknown> =
         typeof image === 'string' ? {} : image;
-      const { embeddings: _clientEmbeddings, ...coercedFields } = clientFields;
       // MEDIA fields can also hold video/audio, which we return unchanged.
       // A null mediaType means the kind couldn't be inferred from the URL's
       // extension, so we hash it and let HMA detect the content type.
@@ -367,6 +370,38 @@ export async function addHashesToImageFields({
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Failed to get HMA hashes for images:', error);
+  }
+}
+
+/**
+ * Drops client-supplied `embeddings` from the image values of `data`. For items
+ * that are not hashed (a report's thread and additional items), this is the
+ * only thing standing between a client and a forged CLIP embedding.
+ *
+ * NB: This mutates `data`.
+ */
+export function removeClientEmbeddings(
+  itemType: Pick<ItemType, 'schema'>,
+  data: { [key: string]: unknown },
+) {
+  const strip = (value: unknown) =>
+    typeof value === 'object' && value !== null && 'embeddings' in value
+      ? _.omit(value, 'embeddings')
+      : value;
+  for (const field of itemType.schema) {
+    const value = data[field.name];
+    if (
+      !isHashableScalarType(getScalarType(field)) ||
+      !hasImageValues(field.type, value)
+    ) {
+      continue;
+    }
+    data[field.name] =
+      field.type === 'ARRAY'
+        ? (value as unknown[]).map(strip)
+        : field.type === 'MAP'
+          ? _.mapValues(value as Record<string, unknown>, strip)
+          : strip(value);
   }
 }
 

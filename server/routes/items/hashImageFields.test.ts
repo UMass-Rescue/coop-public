@@ -6,6 +6,7 @@ import {
   addHashesToImageFields,
   makeClipHasher,
   makeClipHasherForOrg,
+  removeClientEmbeddings,
   type ClipOutcome,
 } from './hashImageFields.js';
 
@@ -973,5 +974,43 @@ describe('addHashesToImageFields with CLIP', () => {
     );
     expect(hashClip).toHaveBeenCalledWith('https://x.test/a.png');
     expect(data.attachment).toMatchObject({ embeddings: CLIP });
+  });
+});
+
+describe('removeClientEmbeddings', () => {
+  it('drops embeddings from single, array and map image values and nothing else', () => {
+    const data: Record<string, unknown> = {
+      text: 'embeddings stay in text fields',
+      cover: { url: 'https://x.test/c.png', embeddings: { clip_float: 'ab' } },
+      profilePic: [
+        { url: 'https://x.test/1.png', embeddings: { clip_float: 'ab' } },
+        'https://x.test/2.png',
+      ],
+      byName: {
+        a: { url: 'https://x.test/3.png', embeddings: { clip_float: 'ab' } },
+      },
+    };
+    const mapSchema = [
+      ...schema,
+      {
+        name: 'byName',
+        type: 'MAP',
+        required: false,
+        container: {
+          containerType: 'MAP',
+          keyScalarType: 'STRING',
+          valueScalarType: 'IMAGE',
+        },
+      },
+    ] as unknown as ItemType['schema'];
+
+    removeClientEmbeddings({ schema: mapSchema }, data);
+
+    expect(data).toEqual({
+      text: 'embeddings stay in text fields',
+      cover: { url: 'https://x.test/c.png' },
+      profilePic: [{ url: 'https://x.test/1.png' }, 'https://x.test/2.png'],
+      byName: { a: { url: 'https://x.test/3.png' } },
+    });
   });
 });

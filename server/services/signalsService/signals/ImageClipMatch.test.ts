@@ -197,6 +197,7 @@ describe('ImageClipMatchSignal', () => {
     it.each([
       ['an empty embedding', { embeddings: { clip_float: '' } }],
       ['an empty embeddings object', { embeddings: {} }],
+      ['an embedding that is not hex', { embeddings: { clip_float: 'xyz!' } }],
     ])('is a permanent error for %s', async (_name, image) => {
       const { signal } = makeSignal();
       await expectPermanentError(

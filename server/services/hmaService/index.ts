@@ -41,6 +41,15 @@ const DEFAULT_CLIP_TIMEOUT_MS = 10_000;
 // A clip_float embedding is 4096 hex characters; this only bounds a bad response.
 const MAX_CLIP_EMBEDDING_LENGTH = 16_384;
 
+/** Whether a value has the shape of a CLIP embedding: a bounded hex string. */
+export function isClipEmbedding(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length <= MAX_CLIP_EMBEDDING_LENGTH &&
+    /^[0-9a-f]+$/i.test(value)
+  );
+}
+
 // Signal types computed by the optional CLIP HMA instance (CLIP_HMA_SERVICE_URL).
 // Every other signal type belongs to the default instance (HMA_SERVICE_URL).
 const CLIP_SIGNAL_TYPES: ReadonlySet<string> = new Set(['clip_float']);
@@ -1244,11 +1253,7 @@ export class HmaService {
     // item, and each key would be used as a signal type for lookups.
     const embedding = (response.body as { clip_float?: unknown } | null)
       ?.clip_float;
-    if (
-      typeof embedding !== 'string' ||
-      embedding.length > MAX_CLIP_EMBEDDING_LENGTH ||
-      !/^[0-9a-f]+$/i.test(embedding)
-    ) {
+    if (!isClipEmbedding(embedding)) {
       throw new Error('Unexpected response from the CLIP instance');
     }
     return { clip_float: embedding };
