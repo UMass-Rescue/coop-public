@@ -30,6 +30,15 @@ This starts `hma-clip` and its own Postgres (`hma-clip-postgres`). The first bui
 
 HMA fetches whatever URL it is given (including following redirects), so anything that can reach this port can make the container request internal addresses. To restrict where it may fetch from, set `HMA_ALLOWED_HOSTNAMES` to a comma-separated list of hostnames (subdomains included) before starting it, for example `HMA_ALLOWED_HOSTNAMES=images.example.com`. When empty, any http(s) URL is allowed. The list is checked against the initial URL only, so an allowed host that redirects elsewhere is still followed, and `github.com` and `raw.githubusercontent.com` are always allowed.
 
+### Before using it in production
+
+`docker-compose.clip.yaml` is set up for local development. For a real deployment:
+
+- **Keep the CLIP instance on a private network.** HMA has no authentication, and one CLIP instance holds the banks of every organization, so anyone who can reach it can read or delete any of them. Only Coop's servers should be able to connect.
+- **Set `HMA_ALLOWED_HOSTNAMES`** to the hosts your images are served from. Without it the instance fetches any URL it is given, including internal addresses.
+- **Change the database password.** `hma-clip-postgres` uses the development password from the compose file.
+- **Treat embeddings like the images they came from.** An embedding stored with an item (about 4 KB per image) is derived from the image, so give it the same retention and access rules.
+
 ### Enable a GPU
 
 1. Check your driver and CUDA version with `nvidia-smi`.
