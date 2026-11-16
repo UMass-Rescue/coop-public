@@ -248,6 +248,7 @@ export type GQLAddManualReviewJobCommentSuccessResponse = {
 
 export type GQLAddPoliciesResponse = {
   readonly __typename: 'AddPoliciesResponse';
+  readonly failureDetails: ReadonlyArray<GQLPolicyCreationFailure>;
   readonly failures: ReadonlyArray<Scalars['String']['output']>;
   readonly policies: ReadonlyArray<GQLPolicy>;
 };
@@ -1436,6 +1437,7 @@ export type GQLIgnoreDecisionComponent =
 export const GQLIntegration = {
   GoogleContentSafetyApi: 'GOOGLE_CONTENT_SAFETY_API',
   OpenAi: 'OPEN_AI',
+  Sentinel: 'SENTINEL',
   Zentropi: 'ZENTROPI',
 } as const;
 
@@ -1461,11 +1463,14 @@ export type GQLIntegrationConfig = {
    * which have custom forms.
    */
   readonly configurationFields: ReadonlyArray<GQLIntegrationConfigField>;
+  /** Whether a credential with a value has been saved, without exposing it. */
+  readonly configured: Scalars['Boolean']['output'];
   readonly docsUrl: Scalars['String']['output'];
   readonly logoUrl?: Maybe<Scalars['String']['output']>;
   readonly logoWithBackgroundUrl?: Maybe<Scalars['String']['output']>;
   readonly modelCard: GQLModelCard;
   readonly modelCardLearnMoreUrl?: Maybe<Scalars['String']['output']>;
+  readonly modelCards: ReadonlyArray<GQLModelCard>;
   readonly name: Scalars['String']['output'];
   readonly requiresConfig: Scalars['Boolean']['output'];
   readonly title: Scalars['String']['output'];
@@ -1543,6 +1548,7 @@ export type GQLIntegrationMetadata = {
   readonly docsUrl: Scalars['String']['output'];
   readonly logoUrl?: Maybe<Scalars['String']['output']>;
   readonly logoWithBackgroundUrl?: Maybe<Scalars['String']['output']>;
+  readonly modelCards: ReadonlyArray<GQLModelCard>;
   readonly name: Scalars['String']['output'];
   readonly requiresConfig: Scalars['Boolean']['output'];
   readonly title: Scalars['String']['output'];
@@ -3425,10 +3431,12 @@ export type GQLNotificationType =
 export type GQLOpenAiIntegrationApiCredential = {
   readonly __typename: 'OpenAiIntegrationApiCredential';
   readonly apiKey: Scalars['String']['output'];
+  readonly csamClassifierApiKey?: Maybe<Scalars['String']['output']>;
 };
 
 export type GQLOpenAiIntegrationApiCredentialInput = {
   readonly apiKey: Scalars['String']['input'];
+  readonly csamClassifierApiKey?: InputMaybe<Scalars['String']['input']>;
 };
 
 export type GQLOrg = {
@@ -3618,6 +3626,17 @@ export type GQLPolicyActionCount = {
   readonly count: Scalars['Int']['output'];
   readonly itemSubmissionIds: ReadonlyArray<Scalars['String']['output']>;
   readonly policyId?: Maybe<Scalars['String']['output']>;
+};
+
+export type GQLPolicyCreationFailure = GQLError & {
+  readonly __typename: 'PolicyCreationFailure';
+  readonly detail?: Maybe<Scalars['String']['output']>;
+  readonly name: Scalars['String']['output'];
+  readonly pointer?: Maybe<Scalars['String']['output']>;
+  readonly requestId?: Maybe<Scalars['String']['output']>;
+  readonly status: Scalars['Int']['output'];
+  readonly title: Scalars['String']['output'];
+  readonly type: ReadonlyArray<Scalars['String']['output']>;
 };
 
 export type GQLPolicyNameExistsError = GQLError & {
@@ -4733,6 +4752,8 @@ export const GQLSignalType = {
   GoogleContentSafetyApiImage: 'GOOGLE_CONTENT_SAFETY_API_IMAGE',
   ImageSimilarityDoesNotMatch: 'IMAGE_SIMILARITY_DOES_NOT_MATCH',
   ImageSimilarityMatch: 'IMAGE_SIMILARITY_MATCH',
+  OpenAiCsamGenaiImageModel: 'OPEN_AI_CSAM_GENAI_IMAGE_MODEL',
+  OpenAiCsamOverallImageModel: 'OPEN_AI_CSAM_OVERALL_IMAGE_MODEL',
   OpenAiGraphicViolenceImageModel: 'OPEN_AI_GRAPHIC_VIOLENCE_IMAGE_MODEL',
   OpenAiGraphicViolenceTextModel: 'OPEN_AI_GRAPHIC_VIOLENCE_TEXT_MODEL',
   OpenAiHateTextModel: 'OPEN_AI_HATE_TEXT_MODEL',
@@ -4751,6 +4772,7 @@ export const GQLSignalType = {
   OpenAiViolenceImageModel: 'OPEN_AI_VIOLENCE_IMAGE_MODEL',
   OpenAiViolenceTextModel: 'OPEN_AI_VIOLENCE_TEXT_MODEL',
   OpenAiWhisperTranscription: 'OPEN_AI_WHISPER_TRANSCRIPTION',
+  SentinelRareClassAffinity: 'SENTINEL_RARE_CLASS_AFFINITY',
   TextMatchingContainsRegex: 'TEXT_MATCHING_CONTAINS_REGEX',
   TextMatchingContainsText: 'TEXT_MATCHING_CONTAINS_TEXT',
   TextMatchingContainsVariant: 'TEXT_MATCHING_CONTAINS_VARIANT',
@@ -5541,14 +5563,24 @@ export type GQLZentropiLabelerVersion = {
   readonly id: Scalars['String']['output'];
   readonly label: Scalars['String']['output'];
   readonly labelerId?: Maybe<Scalars['String']['output']>;
+  readonly model?: Maybe<GQLZentropiModel>;
 };
 
 export type GQLZentropiLabelerVersionInput = {
   readonly id: Scalars['String']['input'];
   readonly label: Scalars['String']['input'];
   readonly labelerId?: InputMaybe<Scalars['String']['input']>;
+  readonly model?: InputMaybe<GQLZentropiModel>;
 };
 
+export const GQLZentropiModel = {
+  CopeBA4B: 'COPE_B_A4B',
+  CopeBS1: 'COPE_B_S1',
+  CopeLatest: 'COPE_LATEST',
+} as const;
+
+export type GQLZentropiModel =
+  (typeof GQLZentropiModel)[keyof typeof GQLZentropiModel];
 export type GQLApiAuthQueryVariables = Exact<{ [key: string]: never }>;
 
 export type GQLApiAuthQuery = {
@@ -6834,7 +6866,7 @@ export type GQLIntegrationConfigQuery = {
               readonly label: string;
             }> | null;
           }>;
-          readonly modelCard: {
+          readonly modelCards: ReadonlyArray<{
             readonly __typename: 'ModelCard';
             readonly modelName: string;
             readonly version: string;
@@ -6858,7 +6890,7 @@ export type GQLIntegrationConfigQuery = {
                 readonly value: string;
               }> | null;
             }> | null;
-          };
+          }>;
           readonly apiCredential:
             | {
                 readonly __typename: 'GoogleContentSafetyApiIntegrationApiCredential';
@@ -6867,6 +6899,7 @@ export type GQLIntegrationConfigQuery = {
             | {
                 readonly __typename: 'OpenAiIntegrationApiCredential';
                 readonly apiKey: string;
+                readonly csamClassifierApiKey?: string | null;
               }
             | {
                 readonly __typename: 'PluginIntegrationApiCredential';
@@ -6880,6 +6913,7 @@ export type GQLIntegrationConfigQuery = {
                   readonly id: string;
                   readonly label: string;
                   readonly labelerId?: string | null;
+                  readonly model?: GQLZentropiModel | null;
                 }>;
               };
         } | null;
@@ -6899,6 +6933,7 @@ export type GQLMyIntegrationsQuery = {
     readonly integrationConfigs: ReadonlyArray<{
       readonly __typename: 'IntegrationConfig';
       readonly name: string;
+      readonly configured: boolean;
     }>;
   } | null;
 };
@@ -6917,6 +6952,12 @@ export type GQLAvailableIntegrationsQuery = {
     readonly requiresConfig: boolean;
     readonly logoUrl?: string | null;
     readonly logoWithBackgroundUrl?: string | null;
+    readonly modelCards: ReadonlyArray<{
+      readonly __typename: 'ModelCard';
+      readonly modelName: string;
+      readonly version: string;
+      readonly releaseDate?: string | null;
+    }>;
   }>;
 };
 
@@ -19818,6 +19859,12 @@ export type GQLAddPoliciesMutation = {
       readonly userStrikeCount?: number | null;
       readonly applyUserStrikeCountConfigToChildren?: boolean | null;
     }>;
+    readonly failureDetails: ReadonlyArray<{
+      readonly __typename: 'PolicyCreationFailure';
+      readonly name: string;
+      readonly title: string;
+      readonly detail?: string | null;
+    }>;
   };
 };
 
@@ -30934,7 +30981,7 @@ export const GQLIntegrationConfigDocument = gql`
           }
           logoUrl
           logoWithBackgroundUrl
-          modelCard {
+          modelCards {
             modelName
             version
             releaseDate
@@ -30961,6 +31008,7 @@ export const GQLIntegrationConfigDocument = gql`
             }
             ... on OpenAiIntegrationApiCredential {
               apiKey
+              csamClassifierApiKey
             }
             ... on ZentropiIntegrationApiCredential {
               apiKey
@@ -30968,6 +31016,7 @@ export const GQLIntegrationConfigDocument = gql`
                 id
                 label
                 labelerId
+                model
               }
             }
             ... on PluginIntegrationApiCredential {
@@ -31086,6 +31135,7 @@ export const GQLMyIntegrationsDocument = gql`
     myOrg {
       integrationConfigs {
         name
+        configured
       }
     }
   }
@@ -31190,6 +31240,11 @@ export const GQLAvailableIntegrationsDocument = gql`
       requiresConfig
       logoUrl
       logoWithBackgroundUrl
+      modelCards {
+        modelName
+        version
+        releaseDate
+      }
     }
   }
 `;
@@ -40505,6 +40560,11 @@ export const GQLAddPoliciesDocument = gql`
         ...PolicyFields
       }
       failures
+      failureDetails {
+        name
+        title
+        detail
+      }
     }
   }
   ${GQLPolicyFieldsFragmentDoc}

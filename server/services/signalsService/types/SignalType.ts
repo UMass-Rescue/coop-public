@@ -36,6 +36,8 @@ export const BuiltInExternalSignalType = makeEnumLike([
 
 export const BuiltInThirdPartySignalType = makeEnumLike([
   'GOOGLE_CONTENT_SAFETY_API_IMAGE',
+  'OPEN_AI_CSAM_GENAI_IMAGE_MODEL',
+  'OPEN_AI_CSAM_OVERALL_IMAGE_MODEL',
   'OPEN_AI_GRAPHIC_VIOLENCE_IMAGE_MODEL',
   'OPEN_AI_GRAPHIC_VIOLENCE_TEXT_MODEL',
   'OPEN_AI_HATE_TEXT_MODEL',
@@ -51,6 +53,7 @@ export const BuiltInThirdPartySignalType = makeEnumLike([
   'OPEN_AI_SEXUAL_TEXT_MODEL',
   'OPEN_AI_VIOLENCE_IMAGE_MODEL',
   'OPEN_AI_VIOLENCE_TEXT_MODEL',
+  'SENTINEL_RARE_CLASS_AFFINITY',
   'ZENTROPI_LABELER',
 ]);
 
@@ -94,6 +97,8 @@ export function integrationForSignalType(type: SignalType | string) {
   switch (type) {
     case 'GOOGLE_CONTENT_SAFETY_API_IMAGE':
       return Integration.GOOGLE_CONTENT_SAFETY_API;
+    case 'OPEN_AI_CSAM_GENAI_IMAGE_MODEL':
+    case 'OPEN_AI_CSAM_OVERALL_IMAGE_MODEL':
     case 'OPEN_AI_GRAPHIC_VIOLENCE_IMAGE_MODEL':
     case 'OPEN_AI_GRAPHIC_VIOLENCE_TEXT_MODEL':
     case 'OPEN_AI_HATE_TEXT_MODEL':
@@ -111,6 +116,8 @@ export function integrationForSignalType(type: SignalType | string) {
     case 'OPEN_AI_VIOLENCE_TEXT_MODEL':
     case 'OPEN_AI_WHISPER_TRANSCRIPTION':
       return Integration.OPEN_AI;
+    case 'SENTINEL_RARE_CLASS_AFFINITY':
+      return Integration.SENTINEL;
     case 'ZENTROPI_LABELER':
       return Integration.ZENTROPI;
     case 'AGGREGATION':

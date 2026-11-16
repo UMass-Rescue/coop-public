@@ -1,3 +1,5 @@
+import { type ItemIdentifier } from '@roostorg/coop-types';
+
 import { type Satisfies } from '../../../utils/typescript-types.js';
 import type {
   AggregationClause,
@@ -21,6 +23,8 @@ export type SignalArgsByType = Satisfies<
     [SignalType.GEO_CONTAINED_WITHIN]: undefined;
     [SignalType.USER_SCORE]: undefined;
     [SignalType.USER_STRIKE_VALUE]: undefined;
+    [SignalType.OPEN_AI_CSAM_GENAI_IMAGE_MODEL]: undefined;
+    [SignalType.OPEN_AI_CSAM_OVERALL_IMAGE_MODEL]: undefined;
     [SignalType.OPEN_AI_GRAPHIC_VIOLENCE_IMAGE_MODEL]: undefined;
     [SignalType.OPEN_AI_GRAPHIC_VIOLENCE_TEXT_MODEL]: undefined;
     [SignalType.OPEN_AI_HATE_TEXT_MODEL]: undefined;
@@ -36,6 +40,7 @@ export type SignalArgsByType = Satisfies<
     [SignalType.OPEN_AI_SEXUAL_TEXT_MODEL]: undefined;
     [SignalType.OPEN_AI_VIOLENCE_IMAGE_MODEL]: undefined;
     [SignalType.OPEN_AI_VIOLENCE_TEXT_MODEL]: undefined;
+    [SignalType.SENTINEL_RARE_CLASS_AFFINITY]: undefined;
     [SignalType.ZENTROPI_LABELER]: undefined;
     [SignalType.CUSTOM]: undefined;
   },
@@ -60,6 +65,8 @@ export type RuntimeSignalArgsByType = Satisfies<
     [SignalType.GEO_CONTAINED_WITHIN]: undefined;
     [SignalType.USER_SCORE]: undefined;
     [SignalType.USER_STRIKE_VALUE]: undefined;
+    [SignalType.OPEN_AI_CSAM_GENAI_IMAGE_MODEL]: undefined;
+    [SignalType.OPEN_AI_CSAM_OVERALL_IMAGE_MODEL]: undefined;
     [SignalType.OPEN_AI_GRAPHIC_VIOLENCE_IMAGE_MODEL]: undefined;
     [SignalType.OPEN_AI_GRAPHIC_VIOLENCE_TEXT_MODEL]: undefined;
     [SignalType.OPEN_AI_HATE_TEXT_MODEL]: undefined;
@@ -75,6 +82,14 @@ export type RuntimeSignalArgsByType = Satisfies<
     [SignalType.OPEN_AI_SEXUAL_TEXT_MODEL]: undefined;
     [SignalType.OPEN_AI_VIOLENCE_IMAGE_MODEL]: undefined;
     [SignalType.OPEN_AI_VIOLENCE_TEXT_MODEL]: undefined;
+    [SignalType.SENTINEL_RARE_CLASS_AFFINITY]: {
+      /** The thread this content belongs to, so earlier messages can be scored too. */
+      threadIdentifier?: ItemIdentifier;
+      /** The content field whose text is scored. */
+      contentTextFieldName?: string;
+      /** When the content was submitted. Later thread messages are not scored. */
+      submissionTime?: Date;
+    };
     [SignalType.ZENTROPI_LABELER]: undefined;
     [SignalType.CUSTOM]: undefined;
   },

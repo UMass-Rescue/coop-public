@@ -2,7 +2,9 @@ import { type ItemIdentifier } from '@roostorg/coop-types';
 
 import type { AggregationsService } from '../../aggregationsService/index.js';
 import type { HmaService } from '../../hmaService/index.js';
+import type { ItemInvestigationService } from '../../itemInvestigationService/index.js';
 import type { GetPoliciesByIdEventuallyConsistent } from '../../manualReviewToolService/manualReviewToolQueries.js';
+import { type FetchHTTP } from '../../networkingService/index.js';
 import { type UserScore } from '../../userStatisticsService/userStatisticsService.js';
 import { type UserStrikeService } from '../../userStrikeService/index.js';
 import AggregationSignal from '../signals/aggregation/AggregationSignal.js';
@@ -20,6 +22,8 @@ import TextMatchingContainsTextSignal from '../signals/text_matching/TextMatchin
 import TextMatchingNotContainsRegexSignal from '../signals/text_matching/TextMatchingNotContainsRegexSignal.js';
 import TextMatchingNotContainsTextSignal from '../signals/text_matching/TextMatchingNotContainsTextSignal.js';
 import GoogleContentSafetyImageSignal from '../signals/third_party_signals/google/content_safety/GoogleContentSafetyImageSignal.js';
+import OpenAiCsamGenAiImageSignal from '../signals/third_party_signals/open_ai/csam_classifier/OpenAiCsamGenAiImageSignal.js';
+import OpenAiCsamOverallImageSignal from '../signals/third_party_signals/open_ai/csam_classifier/OpenAiCsamOverallImageSignal.js';
 import OpenAiGraphicViolenceImageSignal from '../signals/third_party_signals/open_ai/moderation/OpenAiGraphicViolenceImageSignal.js';
 import OpenAiGraphicViolenceTextSignal from '../signals/third_party_signals/open_ai/moderation/OpenAiGraphicViolenceTextSignal.js';
 import OpenAiHateTextSignal from '../signals/third_party_signals/open_ai/moderation/OpenAiHateTextSignal.js';
@@ -36,6 +40,7 @@ import OpenAiSexualTextSignal from '../signals/third_party_signals/open_ai/moder
 import OpenAiViolenceImageSignal from '../signals/third_party_signals/open_ai/moderation/OpenAiViolenceImageSignal.js';
 import OpenAiViolenceTextSignal from '../signals/third_party_signals/open_ai/moderation/OpenAiViolenceTextSignal.js';
 import OpenAiWhisperTranscriptionSignal from '../signals/third_party_signals/open_ai/whisper/OpenAiWhisperTranscriptionSignal.js';
+import SentinelRareClassAffinitySignal from '../signals/third_party_signals/sentinel/SentinelRareClassAffinitySignal.js';
 import ZentropiLabelerSignal from '../signals/third_party_signals/zentropi/ZentropiLabelerSignal.js';
 import UserScoreSignal from '../signals/UserScoreSignal.js';
 import UserStrikesSignal from '../signals/UserStrikesSignal.js';
@@ -54,9 +59,12 @@ export function instantiateBuiltInSignals(
   userStrikeService: UserStrikeService,
   _getPoliciesByIdEventuallyConsistent: GetPoliciesByIdEventuallyConsistent,
   hmaService: HmaService,
+  itemInvestigationService: ItemInvestigationService,
+  fetchHTTP: FetchHTTP,
 ) {
   const {
     googleContentSafetyFetcher: getGoogleContentSafetyScores,
+    openAiCsamClassifierFetcher: getOpenAiCsamClassifierScores,
     openAiModerationFetcher: getOpenAiScores,
     openAiWhisperTranscriptionFetcher: getOpenAiTranscription,
     zentropiFetcher: getZentropiScores,
@@ -83,6 +91,15 @@ export function instantiateBuiltInSignals(
       new GoogleContentSafetyImageSignal(
         credentialGetters.GOOGLE_CONTENT_SAFETY_API,
         getGoogleContentSafetyScores,
+      ),
+    [SignalType.OPEN_AI_CSAM_GENAI_IMAGE_MODEL]: new OpenAiCsamGenAiImageSignal(
+      credentialGetters.OPEN_AI,
+      getOpenAiCsamClassifierScores,
+    ),
+    [SignalType.OPEN_AI_CSAM_OVERALL_IMAGE_MODEL]:
+      new OpenAiCsamOverallImageSignal(
+        credentialGetters.OPEN_AI,
+        getOpenAiCsamClassifierScores,
       ),
     [SignalType.OPEN_AI_GRAPHIC_VIOLENCE_IMAGE_MODEL]:
       new OpenAiGraphicViolenceImageSignal(
@@ -163,6 +180,12 @@ export function instantiateBuiltInSignals(
       getUserScoreEventuallyConsistent,
     ),
     [SignalType.AGGREGATION]: new AggregationSignal(aggregationsService),
+    [SignalType.SENTINEL_RARE_CLASS_AFFINITY]:
+      new SentinelRareClassAffinitySignal(
+        credentialGetters.getForIntegrationId('SENTINEL'),
+        fetchHTTP,
+        itemInvestigationService,
+      ),
     [SignalType.ZENTROPI_LABELER]: new ZentropiLabelerSignal(
       credentialGetters.ZENTROPI,
       getZentropiScores,

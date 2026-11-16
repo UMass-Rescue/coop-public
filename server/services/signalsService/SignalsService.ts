@@ -44,6 +44,7 @@ const publicSignalProps = [
   'getCost',
   'integration',
   'allowedInAutomatedRules',
+  'contextNeeds',
 ] as const;
 
 /**
@@ -129,6 +130,7 @@ export class SignalsService {
     signalAuthService: Dependencies['SignalAuthService'],
     getUserScoreEventuallyConsistent: Dependencies['getUserScoreEventuallyConsistent'],
     fetchHTTP: Dependencies['fetchHTTP'],
+    itemInvestigationService: Dependencies['ItemInvestigationService'],
   ) {
     const cachedCredentialGetters =
       makeCachedCredentialGetters(signalAuthService);
@@ -143,6 +145,8 @@ export class SignalsService {
       this.userStrikeService,
       this.getPoliciesByIdEventuallyConsistent,
       this.hmaService,
+      itemInvestigationService,
+      fetchHTTP,
     );
 
     const pluginEntries = getIntegrationRegistry().getPluginEntries();
@@ -357,6 +361,7 @@ export class SignalsService {
       getCost: it.getCost,
       integration: it.integration,
       allowedInAutomatedRules: it.allowedInAutomatedRules,
+      contextNeeds: it.contextNeeds,
     } satisfies Signal as Signal;
   }
 }
@@ -372,6 +377,7 @@ export default inject(
     'SignalAuthService',
     'getUserScoreEventuallyConsistent',
     'fetchHTTP',
+    'ItemInvestigationService',
   ],
   SignalsService,
 );

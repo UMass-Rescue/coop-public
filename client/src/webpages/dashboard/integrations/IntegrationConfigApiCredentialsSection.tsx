@@ -1,5 +1,6 @@
 import { Button, Input, Select } from 'antd';
-import { Plus, Trash2 } from 'lucide-react';
+import { CheckCircle2, Plus, Trash2 } from 'lucide-react';
+import { useState } from 'react';
 
 import {
   GQLGoogleContentSafetyApiIntegrationApiCredential,
@@ -8,15 +9,41 @@ import {
   GQLIntegrationConfigFieldInputType,
   GQLOpenAiIntegrationApiCredential,
   GQLZentropiIntegrationApiCredential,
+  GQLZentropiModel,
   Scalars,
 } from '../../../graphql/generated';
+import { validateSentinelConfig } from './sentinelConfigValidation';
+
+const ZENTROPI_MODEL_LABELS = {
+  [GQLZentropiModel.CopeLatest]: 'cope-latest (default)',
+  [GQLZentropiModel.CopeBA4B]: 'cope-b-a4b',
+  [GQLZentropiModel.CopeBS1]: 'cope-b-s1',
+} as const satisfies Record<GQLZentropiModel, string>;
+
+const ZENTROPI_MODEL_OPTIONS = Object.entries(ZENTROPI_MODEL_LABELS).map(
+  ([value, label]) => ({ value, label }),
+);
 
 export type PluginConfigField = Omit<GQLIntegrationConfigField, '__typename'>;
+
+function ActiveLabel() {
+  return (
+    <div className="mt-1 flex items-center gap-1 text-xs text-green-600">
+      <CheckCircle2 size={12} /> Active
+    </div>
+  );
+}
 
 export default function IntegrationConfigApiCredentialsSection(props: {
   name: string;
   setApiCredential: (cred: GQLIntegrationApiCredential) => void;
   apiCredential: GQLIntegrationApiCredential;
+  /**
+   * The credential as currently persisted on the server. A key counts as
+   * "Active" only when the entered value matches what is saved, so an unsaved
+   * edit does not read as active.
+   */
+  savedApiCredential?: GQLIntegrationApiCredential;
   compact?: boolean;
   /** Fields declared by a plugin manifest; drives the plugin config form. */
   configurationFields?: readonly PluginConfigField[];
@@ -24,6 +51,7 @@ export default function IntegrationConfigApiCredentialsSection(props: {
   const {
     setApiCredential,
     apiCredential,
+    savedApiCredential,
     compact,
     configurationFields = [],
   } = props;
@@ -51,18 +79,48 @@ export default function IntegrationConfigApiCredentialsSection(props: {
   const renderOpenAiCredential = (
     apiCredential: GQLOpenAiIntegrationApiCredential,
   ) => {
+    const saved =
+      savedApiCredential?.__typename === 'OpenAiIntegrationApiCredential'
+        ? savedApiCredential
+        : undefined;
+    const apiKeyActive =
+      apiCredential.apiKey.length > 0 && apiCredential.apiKey === saved?.apiKey;
+    const csamKeyActive =
+      (apiCredential.csamClassifierApiKey ?? '').length > 0 &&
+      apiCredential.csamClassifierApiKey === saved?.csamClassifierApiKey;
     return (
-      <div className={`flex flex-col ${inputWidthClass}`}>
-        <div className="mb-1">API Key</div>
-        <Input
-          value={apiCredential.apiKey}
-          onChange={(event) =>
-            setApiCredential({
-              ...apiCredential,
-              apiKey: event.target.value,
-            })
-          }
-        />
+      <div className="flex flex-col gap-4">
+        <div className={`flex flex-col ${inputWidthClass}`}>
+          <div className="mb-1">API Key</div>
+          <Input
+            value={apiCredential.apiKey}
+            onChange={(event) =>
+              setApiCredential({
+                ...apiCredential,
+                apiKey: event.target.value,
+              })
+            }
+          />
+          {apiKeyActive ? <ActiveLabel /> : null}
+        </div>
+        <div className={`flex flex-col ${inputWidthClass}`}>
+          <div className="mb-1">CSAM Classifier API Key</div>
+          <div className="mb-1 text-xs text-gray-500">
+            A standard OpenAI API key for the organization granted CSAM
+            Classifier access. This can differ from your Moderation API key if
+            access was granted on a different OpenAI organization.
+          </div>
+          <Input
+            value={apiCredential.csamClassifierApiKey ?? ''}
+            onChange={(event) =>
+              setApiCredential({
+                ...apiCredential,
+                csamClassifierApiKey: event.target.value,
+              })
+            }
+          />
+          {csamKeyActive ? <ActiveLabel /> : null}
+        </div>
       </div>
     );
   };
@@ -74,7 +132,7 @@ export default function IntegrationConfigApiCredentialsSection(props: {
 
     const updateLabelerVersion = (
       index: number,
-      field: 'id' | 'label' | 'labelerId',
+      field: 'id' | 'label' | 'labelerId' | 'model',
       value: string,
     ) => {
       const updated = labelerVersions.map((v, i) =>
@@ -150,6 +208,18 @@ export default function IntegrationConfigApiCredentialsSection(props: {
                 }
                 className="flex-1"
               />
+              <label className="flex flex-1 flex-col">
+                <span className="mb-1">Model</span>
+                <Select
+                  aria-label={`Model for ${version.label || 'labeler version'}`}
+                  value={version.model ?? GQLZentropiModel.CopeLatest}
+                  options={ZENTROPI_MODEL_OPTIONS}
+                  onChange={(model) =>
+                    updateLabelerVersion(index, 'model', model)
+                  }
+                  className="w-full"
+                />
+              </label>
               <Button
                 type="text"
                 icon={<Trash2 size={14} />}
@@ -317,6 +387,87 @@ export default function IntegrationConfigApiCredentialsSection(props: {
     );
   };
 
+  // Sentinel's settings are stored as the same JSON blob as plugin
+  // integrations, but have a fixed set of fields.
+  const SENTINEL_FIELD_LABELS: Record<string, string> = {
+    apiUrl: 'Sentinel API URL',
+    topK: 'Top K (nearest neighbors to consider)',
+    minScoreToConsider: 'Minimum score to consider (0–1)',
+    threadContextWindowMinutes: 'Thread context window (minutes)',
+    threadContextLimit: 'Thread context limit (max prior messages)',
+  };
+  const SENTINEL_NUMERIC_FIELDS = new Set([
+    'topK',
+    'minScoreToConsider',
+    'threadContextWindowMinutes',
+    'threadContextLimit',
+  ]);
+
+  // Text being typed into numeric fields, so input like "0." isn't reset
+  // mid-edit.
+  const [sentinelDrafts, setSentinelDrafts] = useState<Record<string, string>>(
+    {},
+  );
+
+  const renderSentinelCredential = (pluginCredential: {
+    __typename: 'PluginIntegrationApiCredential';
+    credential: Record<string, unknown>;
+  }) => {
+    const credential = pluginCredential.credential ?? {};
+    const errors = validateSentinelConfig(credential);
+    return (
+      <div className="flex flex-col gap-4">
+        {Object.entries(SENTINEL_FIELD_LABELS).map(([key, label]) => (
+          <div key={key} className={`flex flex-col ${inputWidthClass}`}>
+            <div className="mb-1">{label}</div>
+            <Input
+              aria-label={label}
+              status={
+                errors[key] != null && credential[key] != null ? 'error' : ''
+              }
+              value={
+                sentinelDrafts[key] ??
+                (credential[key] == null ? '' : String(credential[key]))
+              }
+              onChange={(event) => {
+                const raw = event.target.value;
+                setSentinelDrafts((prev) => ({ ...prev, [key]: raw }));
+
+                let next: Record<string, unknown>;
+                if (raw.trim() === '') {
+                  const { [key]: _removed, ...rest } = credential;
+                  next = rest;
+                } else if (SENTINEL_NUMERIC_FIELDS.has(key)) {
+                  // Keep non-numeric text as a string so validation flags it.
+                  const parsed = Number(raw);
+                  next = {
+                    ...credential,
+                    [key]: Number.isNaN(parsed) ? raw : parsed,
+                  };
+                } else {
+                  next = { ...credential, [key]: raw };
+                }
+                setApiCredential({
+                  __typename: 'PluginIntegrationApiCredential',
+                  credential:
+                    next as import('../../../graphql/generated').Scalars['JSONObject'],
+                });
+              }}
+              onBlur={() => {
+                // Reformat to the parsed value when typing ends, e.g. "0.10" -> "0.1".
+                const { [key]: _removed, ...rest } = sentinelDrafts;
+                setSentinelDrafts(rest);
+              }}
+            />
+            {errors[key] != null && credential[key] != null && (
+              <div className="mt-1 text-sm text-red-500">{errors[key]}</div>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   const projectKeysInput = () => {
     switch (apiCredential.__typename) {
       case 'GoogleContentSafetyApiIntegrationApiCredential':
@@ -326,7 +477,9 @@ export default function IntegrationConfigApiCredentialsSection(props: {
       case 'ZentropiIntegrationApiCredential':
         return renderZentropiCredential(apiCredential);
       case 'PluginIntegrationApiCredential':
-        return renderPluginCredential(apiCredential);
+        return props.name === 'SENTINEL'
+          ? renderSentinelCredential(apiCredential)
+          : renderPluginCredential(apiCredential);
       default:
         throw new Error('Integration not implemented yet');
     }
