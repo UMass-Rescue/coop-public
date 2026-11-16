@@ -36,6 +36,33 @@ export interface LookupResponse {
   [bankName: string]: BankMatch[] | undefined;
 }
 
+// A clip_float embedding is always 4096 hex characters.
+const CLIP_EMBEDDING_LENGTH = 4096;
+
+/** Whether a value has the shape of a CLIP embedding: a hex string of the fixed length. */
+export function isClipEmbedding(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length === CLIP_EMBEDDING_LENGTH &&
+    /^[0-9a-f]+$/i.test(value)
+  );
+}
+
+// Cosine distance at which HMA stops reporting a CLIP match. It is also
+// enforced locally so that scores below 0.90 never depend on how HMA is
+// configured.
+const CLIP_MAX_DISTANCE = 0.1;
+
+// HMA reports distances as strings. Blank or non-numeric ones are not
+// distances at all, which a bare Number() would hide ('' and null both become 0).
+function parseDistance(distance: unknown): number | undefined {
+  if (typeof distance !== 'string' || distance.trim() === '') {
+    return undefined;
+  }
+  const value = Number(distance);
+  return Number.isFinite(value) ? value : undefined;
+}
+
 export interface ExchangeFieldDescriptor {
   name: string;
   type: string;
@@ -306,6 +333,7 @@ export class HmaService {
   private async hmaBankExists(hmaName: string): Promise<boolean> {
     const response = await this.fetchHTTP({
       url: `${this.hmaServiceUrl}/c/bank/${encodeURIComponent(hmaName)}`,
+      isUntrustedUrl: false,
       method: 'get',
       handleResponseBody: 'discard',
     });
@@ -367,6 +395,7 @@ export class HmaService {
 
       const response = await this.fetchHTTP({
         url: `${this.hmaServiceUrl}/c/banks`,
+        isUntrustedUrl: false,
         method: 'post',
         body: jsonStringify(requestBody),
         headers: { 'Content-Type': 'application/json' },
@@ -392,6 +421,7 @@ export class HmaService {
       if (exchange && enabled_ratio !== 1.0) {
         const ratioResponse = await this.fetchHTTP({
           url: `${this.hmaServiceUrl}/c/bank/${hmaName}`,
+          isUntrustedUrl: false,
           method: 'put',
           body: jsonStringify({ enabled_ratio }),
           headers: { 'Content-Type': 'application/json' },
@@ -436,6 +466,7 @@ export class HmaService {
         url: isExchange
           ? `${this.hmaServiceUrl}/c/exchange/${encodeURIComponent(hmaName)}`
           : `${this.hmaServiceUrl}/c/bank/${encodeURIComponent(hmaName)}`,
+        isUntrustedUrl: false,
         method: 'delete',
         handleResponseBody: 'discard',
       });
@@ -557,6 +588,7 @@ export class HmaService {
   ): Promise<void> {
     const response = await this.fetchHTTP({
       url: `${this.hmaServiceUrl}/c/bank/${encodeURIComponent(hmaName)}`,
+      isUntrustedUrl: false,
       method: 'put',
       body: jsonStringify(changes),
       headers: { 'Content-Type': 'application/json' },
@@ -587,6 +619,7 @@ export class HmaService {
 
     const response = await this.fetchHTTP({
       url,
+      isUntrustedUrl: false,
       method: 'delete',
       handleResponseBody: 'discard',
     });
@@ -608,6 +641,7 @@ export class HmaService {
   private async getExchangeApiName(hmaName: string): Promise<string | null> {
     const response = await this.fetchHTTP({
       url: `${this.hmaServiceUrl}/c/exchange/${encodeURIComponent(hmaName)}`,
+      isUntrustedUrl: false,
       method: 'get',
       handleResponseBody: 'as-json',
     });
@@ -636,6 +670,7 @@ export class HmaService {
     try {
       const response = await this.fetchHTTP({
         url: `${this.hmaServiceUrl}/c/bank/${bank.hma_name}`,
+        isUntrustedUrl: false,
         method: 'get',
         handleResponseBody: 'discard',
       });
@@ -668,6 +703,7 @@ export class HmaService {
   private async forgetMissingBank(bank: HashBank): Promise<boolean> {
     const response = await this.fetchHTTP({
       url: `${this.hmaServiceUrl}/c/exchange/${encodeURIComponent(bank.hma_name)}`,
+      isUntrustedUrl: false,
       method: 'delete',
       handleResponseBody: 'discard',
     });
@@ -696,6 +732,7 @@ export class HmaService {
     try {
       const response = await this.fetchHTTP({
         url: `${this.hmaServiceUrl}/c/bank/${bank.hma_name}`,
+        isUntrustedUrl: false,
         method: 'get',
         handleResponseBody: 'discard',
       });
@@ -730,6 +767,7 @@ export class HmaService {
           try {
             const response = await this.fetchHTTP({
               url: `${this.hmaServiceUrl}/c/bank/${bank.hma_name}`,
+              isUntrustedUrl: false,
               method: 'get',
               headers: {
                 'Content-Type': 'application/json',
@@ -770,6 +808,7 @@ export class HmaService {
   async getExchangeApis(): Promise<ExchangeApiInfo[]> {
     const apisResponse = await this.fetchHTTP({
       url: `${this.hmaServiceUrl}/c/exchanges/apis`,
+      isUntrustedUrl: false,
       method: 'get',
       handleResponseBody: 'as-json',
     });
@@ -785,6 +824,7 @@ export class HmaService {
         try {
           const configResponse = await this.fetchHTTP({
             url: `${this.hmaServiceUrl}/c/exchanges/api/${encodeURIComponent(name)}`,
+            isUntrustedUrl: false,
             method: 'get',
             handleResponseBody: 'as-json',
           });
@@ -810,6 +850,7 @@ export class HmaService {
     try {
       const response = await this.fetchHTTP({
         url: `${this.hmaServiceUrl}/c/exchanges/api/${encodeURIComponent(apiName)}/schema`,
+        isUntrustedUrl: false,
         method: 'get',
         handleResponseBody: 'as-json',
       });
@@ -851,6 +892,7 @@ export class HmaService {
 
     const response = await this.fetchHTTP({
       url: `${this.hmaServiceUrl}/c/exchanges`,
+      isUntrustedUrl: false,
       method: 'post',
       body: jsonStringify(requestBody),
       headers: { 'Content-Type': 'application/json' },
@@ -882,6 +924,7 @@ export class HmaService {
   ): Promise<ExchangeCredentialStatus> {
     const response = await this.fetchHTTP({
       url: `${this.hmaServiceUrl}/c/exchange/${encodeURIComponent(hmaName)}/credentials`,
+      isUntrustedUrl: false,
       method: 'post',
       body: jsonStringify({ credential_json: credentialJson }),
       headers: { 'Content-Type': 'application/json' },
@@ -940,6 +983,7 @@ export class HmaService {
     try {
       response = await this.fetchHTTP({
         url: `${this.hmaServiceUrl}/c/exchange/${encodeURIComponent(hmaName)}`,
+        isUntrustedUrl: false,
         method: 'get',
         handleResponseBody: 'as-json',
       });
@@ -980,6 +1024,7 @@ export class HmaService {
     try {
       const statusResponse = await this.fetchHTTP({
         url: `${this.hmaServiceUrl}/c/exchange/${encodeURIComponent(hmaName)}/status`,
+        isUntrustedUrl: false,
         method: 'get',
         handleResponseBody: 'as-json',
       });
@@ -1008,9 +1053,64 @@ export class HmaService {
     return info;
   }
 
+  /**
+   * Whether this deployment's HMA computes CLIP embeddings, as declared by the
+   * operator with HMA_CLIP_ENABLED. See docs/integrations/hma-clip.md.
+   */
+  isClipEnabled(): boolean {
+    return process.env.HMA_CLIP_ENABLED === 'true';
+  }
+
+  /**
+   * Finds how close a CLIP embedding is to the images in the given banks.
+   * Returns the closest cosine distance (0 is identical) and the banks that
+   * had a match. Only matches within cosine distance 0.10 count, whatever
+   * cutoff HMA is configured with, so a distance is only ever reported for
+   * images that are close enough. Matches without a usable distance are
+   * ignored, since they cannot be scored.
+   * @param hmaBankIds HMA names of the banks to look in
+   * @param embedding The hex clip_float embedding of the image
+   */
+  async findClosestClipMatch(
+    hmaBankIds: string[],
+    embedding: string,
+  ): Promise<{
+    matchedBanks: string[];
+    closestDistance: number | undefined;
+  }> {
+    if (hmaBankIds.length === 0) {
+      return { matchedBanks: [], closestDistance: undefined };
+    }
+    const matches = await this.lookupContent({
+      signal: embedding,
+      signalType: 'clip_float',
+    });
+
+    const matchedBanks: string[] = [];
+    let closestDistance: number | undefined;
+    for (const bankId of hmaBankIds) {
+      const bankMatches = matches[bankId];
+      const distances = Array.isArray(bankMatches)
+        ? bankMatches
+            .map((match) => parseDistance(match.distance))
+            .filter(
+              (distance): distance is number =>
+                distance !== undefined && distance <= CLIP_MAX_DISTANCE,
+            )
+        : [];
+      if (distances.length > 0) {
+        matchedBanks.push(bankId);
+        closestDistance = Math.min(closestDistance ?? Infinity, ...distances);
+      }
+    }
+
+    return { matchedBanks, closestDistance };
+  }
+
   async hashContentFromUrl(url: string): Promise<Record<string, string>> {
     const response = await this.fetchHTTP({
       url: `${this.hmaServiceUrl}/h/hash?url=${encodeURIComponent(url)}`,
+      isUntrustedUrl: false,
       method: 'get',
       handleResponseBody: 'as-json',
     });
@@ -1059,6 +1159,7 @@ export class HmaService {
 
       response = await this.fetchHTTP({
         url: `${this.hmaServiceUrl}/c/bank/${bankName}/content?${params.toString()}`,
+        isUntrustedUrl: false,
         method: 'post',
         handleResponseBody: 'as-json',
       });
@@ -1071,17 +1172,15 @@ export class HmaService {
       const formData = new FormData();
       formData.append(contentType, file);
 
+      // HMA reads one `metadata` form field holding a JSON object with exactly
+      // these keys, and rejects any other key with a 400.
       if (metadata) {
-        if (metadata.content_id)
-          formData.append('content_id', metadata.content_id);
-        if (metadata.content_uri)
-          formData.append('content_uri', metadata.content_uri);
-        if (metadata.json)
-          formData.append('metadata', jsonStringify(metadata.json));
+        formData.append('metadata', jsonStringify(metadata));
       }
 
       response = await this.fetchHTTP({
         url: `${this.hmaServiceUrl}/c/bank/${bankName}/content`,
+        isUntrustedUrl: false,
         method: 'post',
         // Don't set Content-Type explicitly: undici needs to add the multipart
         // boundary parameter itself when serializing the FormData.
@@ -1113,6 +1212,7 @@ export class HmaService {
 
     const response = await this.fetchHTTP({
       url: `${this.hmaServiceUrl}/m/lookup?${params.toString()}`,
+      isUntrustedUrl: false,
       method: 'get',
       handleResponseBody: 'as-json',
     });

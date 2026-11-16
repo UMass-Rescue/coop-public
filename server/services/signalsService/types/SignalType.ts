@@ -28,6 +28,7 @@ export const BuiltInExternalSignalType = makeEnumLike([
   'TEXT_SIMILARITY_SCORE',
   'IMAGE_SIMILARITY_DOES_NOT_MATCH',
   'IMAGE_SIMILARITY_MATCH',
+  'IMAGE_CLIP_MATCH',
   'GEO_CONTAINED_WITHIN',
   'USER_STRIKE_VALUE',
   'USER_SCORE',
@@ -36,6 +37,8 @@ export const BuiltInExternalSignalType = makeEnumLike([
 
 export const BuiltInThirdPartySignalType = makeEnumLike([
   'GOOGLE_CONTENT_SAFETY_API_IMAGE',
+  'OPEN_AI_CSAM_GENAI_IMAGE_MODEL',
+  'OPEN_AI_CSAM_OVERALL_IMAGE_MODEL',
   'OPEN_AI_GRAPHIC_VIOLENCE_IMAGE_MODEL',
   'OPEN_AI_GRAPHIC_VIOLENCE_TEXT_MODEL',
   'OPEN_AI_HATE_TEXT_MODEL',
@@ -94,6 +97,8 @@ export function integrationForSignalType(type: SignalType | string) {
   switch (type) {
     case 'GOOGLE_CONTENT_SAFETY_API_IMAGE':
       return Integration.GOOGLE_CONTENT_SAFETY_API;
+    case 'OPEN_AI_CSAM_GENAI_IMAGE_MODEL':
+    case 'OPEN_AI_CSAM_OVERALL_IMAGE_MODEL':
     case 'OPEN_AI_GRAPHIC_VIOLENCE_IMAGE_MODEL':
     case 'OPEN_AI_GRAPHIC_VIOLENCE_TEXT_MODEL':
     case 'OPEN_AI_HATE_TEXT_MODEL':
@@ -117,6 +122,7 @@ export function integrationForSignalType(type: SignalType | string) {
     case 'CUSTOM':
     case 'GEO_CONTAINED_WITHIN':
     case 'GOOGLE_CLOUD_TRANSLATE_MODEL':
+    case 'IMAGE_CLIP_MATCH':
     case 'IMAGE_SIMILARITY_DOES_NOT_MATCH':
     case 'IMAGE_SIMILARITY_MATCH':
     case 'TEXT_MATCHING_CONTAINS_REGEX':

@@ -11,7 +11,7 @@ Retrieves the signup invite link for a user that was invited from the UI.
 From the `server` directory, run:
 
 ```bash
-pnpm run get-invite --email "user@example.com"
+node bin/get-invite-token.js --email "user@example.com"
 ```
 
 ### Parameters
@@ -65,7 +65,7 @@ Creates a new organization with an admin user and generates an API key.
 From the `server` directory, run:
 
 ```bash
-pnpm run create-org \
+node bin/create-org-and-user.js \
   --name "My Organization" \
   --email "admin@example.com" \
   --website "https://example.com" \
@@ -187,12 +187,12 @@ both default and NCMEC queues:
 
 ```bash
 # Dry run -- prints what would be re-enqueued, makes no changes
-pnpm run recover-mrt-queue \
+node bin/recover-mrt-queue.js \
   --orgId "<orgId>" \
   --queueId "<queueId>"
 
 # Actually re-enqueue
-pnpm run recover-mrt-queue \
+node bin/recover-mrt-queue.js \
   --orgId "<orgId>" \
   --queueId "<queueId>" \
   --apply
@@ -238,3 +238,11 @@ pnpm run recover-mrt-queue \
 - Report history is best-effort: only inbound `submitReport` rows that made
   it into `REPORTING_SERVICE.REPORTS` are restored. Rule-driven enqueues
   (`ENQUEUE_TO_MRT`) never had a report history to begin with.
+
+## seed-clip-bank.ts
+
+Adds the images in a directory to a hash bank, hashing them with every signal HMA has enabled (including CLIP). See [Add images to a bank](../../docs/integrations/hma-clip.md#add-images-to-a-bank).
+
+```bash
+pnpm run seed-clip-bank --org <orgId> --bank "<bank name>" --dir <directory> [--dry-run]
+```

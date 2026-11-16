@@ -18,9 +18,12 @@ export type SignalArgsByType = Satisfies<
     [SignalType.TEXT_SIMILARITY_SCORE]: undefined;
     [SignalType.IMAGE_SIMILARITY_DOES_NOT_MATCH]: undefined;
     [SignalType.IMAGE_SIMILARITY_MATCH]: undefined;
+    [SignalType.IMAGE_CLIP_MATCH]: undefined;
     [SignalType.GEO_CONTAINED_WITHIN]: undefined;
     [SignalType.USER_SCORE]: undefined;
     [SignalType.USER_STRIKE_VALUE]: undefined;
+    [SignalType.OPEN_AI_CSAM_GENAI_IMAGE_MODEL]: undefined;
+    [SignalType.OPEN_AI_CSAM_OVERALL_IMAGE_MODEL]: undefined;
     [SignalType.OPEN_AI_GRAPHIC_VIOLENCE_IMAGE_MODEL]: undefined;
     [SignalType.OPEN_AI_GRAPHIC_VIOLENCE_TEXT_MODEL]: undefined;
     [SignalType.OPEN_AI_HATE_TEXT_MODEL]: undefined;
@@ -57,9 +60,12 @@ export type RuntimeSignalArgsByType = Satisfies<
     [SignalType.TEXT_SIMILARITY_SCORE]: undefined;
     [SignalType.IMAGE_SIMILARITY_DOES_NOT_MATCH]: undefined;
     [SignalType.IMAGE_SIMILARITY_MATCH]: undefined;
+    [SignalType.IMAGE_CLIP_MATCH]: undefined;
     [SignalType.GEO_CONTAINED_WITHIN]: undefined;
     [SignalType.USER_SCORE]: undefined;
     [SignalType.USER_STRIKE_VALUE]: undefined;
+    [SignalType.OPEN_AI_CSAM_GENAI_IMAGE_MODEL]: undefined;
+    [SignalType.OPEN_AI_CSAM_OVERALL_IMAGE_MODEL]: undefined;
     [SignalType.OPEN_AI_GRAPHIC_VIOLENCE_IMAGE_MODEL]: undefined;
     [SignalType.OPEN_AI_GRAPHIC_VIOLENCE_TEXT_MODEL]: undefined;
     [SignalType.OPEN_AI_HATE_TEXT_MODEL]: undefined;

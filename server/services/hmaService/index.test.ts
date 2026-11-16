@@ -1,12 +1,17 @@
-import { vi, type Mock } from 'vitest';
+import fc from 'fast-check';
+import { assert, vi, type Mock } from 'vitest';
 
-import { jsonParse } from '../../utils/encoding.js';
+import createOrg from '../../test/fixtureHelpers/createOrg.js';
+import { makeTransactionalTestWithFixture } from '../../test/harness/transactionalTest.js';
+import { jsonParse, tryJsonParse } from '../../utils/encoding.js';
+import { type CoopRequestQuery } from '../networkingService/index.js';
 import type { HashBank } from './dbTypes.js';
 import {
+  HashBankService,
   HashBankUserError,
   HmaService,
+  isClipEmbedding,
   type ExchangeInfo,
-  type HashBankService,
 } from './index.js';
 
 const MOCK_BANK: HashBank = {
@@ -583,41 +588,115 @@ describe('HmaService', () => {
       'GET /c/exchanges/api/ncmec/schema': ok(NCMEC_SCHEMA),
     };
 
-    it('posts to /c/exchange/<hma_name>/credentials and returns the status', async () => {
-      const fetchHTTP = routeFetch({
-        ...exchangeRoutes,
-        'POST /c/exchange/COOP_ORG1_TEST_BANK/credentials': ok({
-          supports_auth: true,
-          has_credentials: true,
-          source: 'exchange',
-        }),
-      });
-      const svc = makeService(fetchHTTP);
-
-      const status = await svc.setBankExchangeCredentials('org1', 1, {
-        user: 'u',
-        password: 'p',
-      });
-
-      expect(status).toEqual({
-        has_credentials: true,
-        has_own_credentials: true,
-      });
-      const [call] = callsTo(fetchHTTP, 'post', '/credentials');
-      expect(jsonParse(call.body!)).toEqual({
-        credential_json: { user: 'u', password: 'p' },
-      });
+    const testWithBanks = makeTransactionalTestWithFixture(async ({ deps }) => {
+      const orgs = [await createOrg(deps), await createOrg(deps)];
+      const hashBankService = new HashBankService(deps.KyselyPg);
+      const banks = await Promise.all(
+        [0, 1, 2, 3].map(async (index) =>
+          hashBankService.create({
+            org_id: orgs[index % 2].org.id,
+            name: `bank-${Math.floor(index / 2)}`,
+            hma_name: `EXCHANGE_${orgs[index % 2].org.id}_${index}`,
+            enabled_ratio: 1,
+          }),
+        ),
+      );
+      return { orgs, banks };
     });
 
-    it("refuses another org's bank without calling HMA", async () => {
-      const fetchHTTP = routeFetch({});
-      const svc = makeService(fetchHTTP);
-
-      await expect(
-        svc.setBankExchangeCredentials('org2', 1, { user: 'u' }),
-      ).rejects.toThrow('Hash bank not found');
-      expect(fetchHTTP).not.toHaveBeenCalled();
-    });
+    testWithBanks(
+      'credential updates change only the selected tenant-owned exchange',
+      async ({ deps, orgs, banks }) => {
+        const initialState = Object.fromEntries([
+          [
+            '/c/exchanges/api/ncmec/credentials',
+            { credential_json: { user: 'shared', password: 'shared' } },
+          ],
+          ...banks.map((bank) => [
+            `/c/exchange/${bank.hma_name}/credentials`,
+            { credential_json: { user: bank.hma_name, password: 'initial' } },
+          ]),
+        ]);
+        let remoteState: Record<string, unknown> = initialState;
+        const fetchHTTP = vi.fn(async (req: CoopRequestQuery<'as-json'>) => {
+          const path = new URL(req.url).pathname.replace(/^\/+/, '/');
+          if (req.method === 'post') {
+            // Record every write, including an accidental provider-global route.
+            assert(typeof req.body === 'string');
+            remoteState = { ...remoteState, [path]: tryJsonParse(req.body) };
+            return ok({ has_credentials: true, source: 'exchange' });
+          }
+          if (req.method === 'get') {
+            if (path === '/c/exchanges/api/ncmec/schema') {
+              return ok(NCMEC_SCHEMA);
+            }
+            if (banks.some((bank) => path === `/c/exchange/${bank.hma_name}`)) {
+              return ok({ api: 'ncmec' });
+            }
+          }
+          throw new Error(`Unexpected request: ${req.method} ${path}`);
+        });
+        const service = new HmaService(
+          fetchHTTP as never,
+          deps.KyselyPg,
+          deps.Tracer,
+        );
+        const operation = fc.record({
+          actor: fc.integer({ min: 0, max: 1 }),
+          bank: fc.integer({ min: 0, max: 3 }),
+          password: fc.string({ minLength: 1, maxLength: 32 }),
+        });
+        await fc.assert(
+          fc.asyncProperty(
+            fc.array(operation, { minLength: 1, maxLength: 10 }),
+            async (operations) => {
+              remoteState = initialState;
+              let expected = initialState;
+              for (const { actor, bank: index, password } of operations) {
+                const bank = banks[index];
+                const orgId = orgs[actor].org.id;
+                const credentials = { user: `user-${actor}`, password };
+                const result = service.setBankExchangeCredentials(
+                  orgId,
+                  bank.id,
+                  credentials,
+                );
+                if (bank.org_id === orgId) {
+                  await expect(result).resolves.toEqual({
+                    has_credentials: true,
+                    has_own_credentials: true,
+                  });
+                  expected = {
+                    ...expected,
+                    [`/c/exchange/${bank.hma_name}/credentials`]: {
+                      credential_json: credentials,
+                    },
+                  };
+                } else {
+                  await expect(result).rejects.toThrow('Hash bank not found');
+                }
+                expect(remoteState).toEqual(expected);
+              }
+            },
+          ),
+          {
+            numRuns: 25,
+            examples: [
+              [
+                [
+                  { actor: 0, bank: 0, password: 'first' },
+                  { actor: 1, bank: 1, password: 'second' },
+                  { actor: 0, bank: 1, password: 'forbidden' },
+                  { actor: 0, bank: 2, password: 'third' },
+                  { actor: 0, bank: 0, password: 'replacement' },
+                ],
+              ],
+            ],
+          },
+        );
+      },
+      20_000,
+    );
 
     it('refuses banks that are not connected to an exchange', async () => {
       const fetchHTTP = routeFetch({
@@ -1103,6 +1182,187 @@ describe('HmaService', () => {
 
       expect(result.config_schema.fields).toHaveLength(0);
       expect(result.credentials_schema).toBeNull();
+    });
+  });
+  describe('addContentToBank', () => {
+    const BANK = 'COOP_ORG1_MY_BANK';
+    const file = new File([new Uint8Array([1, 2, 3])], 'a.jpg', {
+      type: 'image/jpeg',
+    });
+    const upload = async (metadata?: Record<string, unknown>) => {
+      const fetchHTTP = routeFetch({
+        [`POST /c/bank/${BANK}/content`]: ok({ id: 7, signals: {} }),
+      });
+      const result = await makeService(fetchHTTP).addContentToBank(BANK, {
+        file,
+        contentType: 'photo',
+        metadata,
+      });
+      const [call] = callsTo(fetchHTTP, 'post', '/content');
+      return { result, form: call.body as unknown as FormData };
+    };
+
+    it('uploads the file under its content type', async () => {
+      const { result, form } = await upload();
+      expect(result).toEqual({ id: 7, signals: {} });
+      expect([...form.keys()]).toEqual(['photo']);
+    });
+
+    it('sends metadata as the one JSON form field HMA reads, with only the keys HMA accepts', async () => {
+      const { form } = await upload({
+        content_id: 'abc',
+        json: { file_name: 'a.jpg' },
+      });
+      expect([...form.keys()].sort()).toEqual(['metadata', 'photo']);
+      expect(
+        jsonParse(form.get('metadata') as Parameters<typeof jsonParse>[0]),
+      ).toEqual({
+        content_id: 'abc',
+        json: { file_name: 'a.jpg' },
+      });
+    });
+  });
+
+  describe('CLIP', () => {
+    const HASH = 'ab'.repeat(2048);
+    const BANKS = ['COOP_ORG1_A', 'COOP_ORG1_B'];
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it('is only enabled when the operator sets HMA_CLIP_ENABLED to true', () => {
+      const enabled = (value: string | undefined) => {
+        vi.stubEnv('HMA_CLIP_ENABLED', value);
+        return makeService(vi.fn()).isClipEnabled();
+      };
+      expect(enabled(undefined)).toBe(false);
+      expect(enabled('false')).toBe(false);
+      expect(enabled('1')).toBe(false);
+      expect(enabled('true')).toBe(true);
+    });
+
+    describe('isClipEmbedding', () => {
+      it('accepts a hex string', () => {
+        expect(isClipEmbedding(HASH)).toBe(true);
+      });
+
+      it.each([
+        ['undefined', undefined],
+        ['a number', 12],
+        ['a list', [1, 2]],
+        ['an empty string', ''],
+        ['a non-hex string', 'not hex!'],
+        ['a shorter hex string', 'ab'.repeat(8)],
+        ['a longer hex string', 'a'.repeat(4097)],
+      ])('rejects %s', (_name, value) => {
+        expect(isClipEmbedding(value)).toBe(false);
+      });
+    });
+
+    describe('findClosestClipMatch', () => {
+      const find = async (body: unknown, banks = BANKS) => {
+        const fetchHTTP = routeFetch({ 'GET /m/lookup': ok(body) });
+        const result = await makeService(fetchHTTP).findClosestClipMatch(
+          banks,
+          HASH,
+        );
+        return { result, fetchHTTP };
+      };
+
+      it('returns the closest distance across the banks, and the banks that matched', async () => {
+        const { result } = await find({
+          COOP_ORG1_A: [
+            { bank_content_id: 1, distance: '0.08' },
+            { bank_content_id: 2, distance: '0.05' },
+          ],
+          COOP_ORG1_B: [{ bank_content_id: 3, distance: '0.03' }],
+        });
+        expect(result).toEqual({
+          matchedBanks: ['COOP_ORG1_A', 'COOP_ORG1_B'],
+          closestDistance: 0.03,
+        });
+      });
+
+      it('ignores matches beyond the 0.10 cutoff even if HMA returns them', async () => {
+        const { result } = await find({
+          COOP_ORG1_A: [{ bank_content_id: 1, distance: '0.25' }],
+          COOP_ORG1_B: [
+            { bank_content_id: 2, distance: '0.30' },
+            { bank_content_id: 3, distance: '0.10' },
+          ],
+        });
+        expect(result).toEqual({
+          matchedBanks: ['COOP_ORG1_B'],
+          closestDistance: 0.1,
+        });
+      });
+
+      it('looks the embedding up with a GET, which HMA accepts at this length', async () => {
+        const { fetchHTTP } = await find({});
+        const [call] = callsTo(fetchHTTP, 'get', '/m/lookup');
+        const params = new URL(call.url).searchParams;
+        expect(params.get('signal_type')).toBe('clip_float');
+        expect(params.get('signal')).toBe(HASH);
+      });
+
+      it('reports no match and no distance when nothing is close enough', async () => {
+        const { result } = await find({});
+        expect(result).toEqual({
+          matchedBanks: [],
+          closestDistance: undefined,
+        });
+      });
+
+      it('ignores banks it was not asked about', async () => {
+        const { result } = await find({
+          OTHER_BANK: [{ bank_content_id: 9, distance: '0.01' }],
+          COOP_ORG1_A: [{ bank_content_id: 1, distance: '0.07' }],
+        });
+        expect(result).toEqual({
+          matchedBanks: ['COOP_ORG1_A'],
+          closestDistance: 0.07,
+        });
+      });
+
+      it('ignores matches without a usable distance, since they cannot be scored', async () => {
+        const { result } = await find({
+          COOP_ORG1_A: [
+            { bank_content_id: 1, distance: '' },
+            { bank_content_id: 2, distance: null },
+            { bank_content_id: 3, distance: 'n/a' },
+          ],
+          COOP_ORG1_B: [
+            { bank_content_id: 4, distance: 'NaN' },
+            { bank_content_id: 5, distance: '0.09' },
+          ],
+        });
+        expect(result).toEqual({
+          matchedBanks: ['COOP_ORG1_B'],
+          closestDistance: 0.09,
+        });
+      });
+
+      it('copes with a bank entry that is not a list', async () => {
+        const { result } = await find({ COOP_ORG1_A: 'unexpected' });
+        expect(result.matchedBanks).toEqual([]);
+      });
+
+      it('does not call HMA when there are no banks to look in', async () => {
+        const { result, fetchHTTP } = await find({}, []);
+        expect(result).toEqual({
+          matchedBanks: [],
+          closestDistance: undefined,
+        });
+        expect(fetchHTTP).not.toHaveBeenCalled();
+      });
+
+      it('throws when HMA rejects the lookup', async () => {
+        const fetchHTTP = routeFetch({ 'GET /m/lookup': fail(503) });
+        await expect(
+          makeService(fetchHTTP).findClosestClipMatch(BANKS, HASH),
+        ).rejects.toThrow('Failed to lookup content: 503');
+      });
     });
   });
 });
